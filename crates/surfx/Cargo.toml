@@ -1,0 +1,13 @@
+[package]
+name = "surfx"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+surfoxide-core = { path = "../surfoxide-core" }
+burn = { workspace = true, features = ["flex"] }
+
+[features]
+wgpu = ["burn/wgpu"]
+cuda = ["burn/cuda"]

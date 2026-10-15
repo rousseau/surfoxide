@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/surfoxide-core", "crates/surfx"]
+
+[workspace.dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+burn = { version = "0.22.0", default-features = false, features = ["std"] }
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/rousseau/surfoxide"

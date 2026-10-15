@@ -1,0 +1,60 @@
+# surfoxide — instructions pour Claude Code
+
+## Le projet
+
+Boîte à outils Rust/Burn pour les surfaces corticales (IRM fœtale et néonatale). Trois dépôts liés
+par les données, pas par le code :
+
+- **medoxide** (github.com/rousseau/medoxide) : reconstruction SVR, segmentation (multi-)BOUNTI → NIfTI.
+- **surfoxide** (ce dépôt) : surfaces WM/GM et GM/CSF, contrat de validité, mesures corticales → GIfTI.
+- **gyroxide** : tétraédrisation, champs issus des images, simulation du plissement ; renvoie sa
+  surface simulée à surfoxide pour qu'elle soit mesurée par le même code que les surfaces réelles.
+
+Document de référence (état de l'art, positionnement, priorités) :
+https://claude.ai/code/artifact/492fa76d-b8bf-4ad7-bf59-796739415874
+
+## Contrat de données
+
+- Coordonnées monde RAS en mm ; affine de l'image source conservée dans les métadonnées.
+- Faces orientées, normales sortantes (`TriMesh::signed_volume() > 0` pour une surface fermée).
+- Formats : NIfTI en entrée, GIfTI pour surfaces et champs par sommet, VTK `.vtu` côté gyroxide.
+- Une surface livrée à gyroxide est : fermée, 2-variété, orientée de façon cohérente, d'un seul
+  tenant, de genre 0, sans auto-intersection ; la WM est strictement dans la piale avec une
+  épaisseur minimale.
+
+## Priorités (voir le document de référence)
+
+P0, des surfaces utilisables par gyroxide :
+1. Types de base (`TriMesh`, champs par sommet, conversion vers tenseurs Burn) — commencé.
+2. Entrées-sorties : NIfTI (segmentations), GIfTI, VTK `.vtp`, PLY/STL, surfaces FreeSurfer.
+3. Masque d'hémisphère fermé à partir des labels BOUNTI (19 régions) et multi-BOUNTI.
+4. Correction topologique voxelique (Bazin, fast marching).
+5. Marching cubes à topologie cohérente, lissage de Taubin.
+6. Remaillage isotrope.
+7. Contrôles géométriques : topologie (fait : `topology.rs`), auto-intersections (AABB + tests
+   triangle–triangle), distance minimale WM–piale.
+8. Réparation locale des faces fautives.
+9. Piale sans apprentissage : gonflement de la WM vers la frontière cortex/LCR (flot déterministe).
+
+P1 : intégrateur ODE dans Burn, réseaux de déformation à la CoSeg (faiblement supervisés par les
+segmentations de medoxide), opérateurs différentiels, métriques (épaisseur, profondeur sulcale,
+gyrification, métrique spectrale), projection des lobes multi-BOUNTI, lecture `.vtu` de gyroxide.
+
+Baseline de référence pour P0 : fetpype `surface_processing` (github.com/fetpype/surface_processing).
+
+## Conventions (alignées sur medoxide)
+
+- Workspace Cargo ; dépendances partagées dans `[workspace.dependencies]`, `Cargo.lock` versionné.
+- Burn 0.22 (`default-features = false`) ; même version que medoxide pour un futur binaire commun.
+- CPU par défaut avec le backend `flex` (déterministe, utilisé par les tests) ; GPU par les features
+  `cuda` (machine WSL RTX 3080) ou `wgpu` (Mac).
+- `surfoxide-core` reste sans Burn ni format de fichier ; un crate par module ; `surfx` est la CLI.
+- Pas de dépendance sans code qui l'utilise.
+- Commentaires, documentation, messages d'erreur et noms de tests en français.
+- Avant chaque commit : `cargo fmt`, `cargo clippy --all-targets`, `cargo test --release`.
+
+## Machines
+
+- Développement GPU : PC Windows RTX 3080 sous WSL (alias ssh `sshwsl` depuis le Mac, via Tailscale) ;
+  pas toujours allumé.
+- La compilation `--features cuda` télécharge un paquet LLVM (~45 Mo) dans `~/.cache/tracel/`.

@@ -1,0 +1,13 @@
+/target
+*.nii
+*.nii.gz
+*.gii
+*.vtk
+*.vtp
+*.vtu
+.DS_Store
+
+# Cargo.lock EST versionné : ce workspace produit un binaire.
+
+# Données locales
+/data/
