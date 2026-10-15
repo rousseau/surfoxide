@@ -30,9 +30,17 @@ ok "Ubuntu ${VERSION_ID:-?}"
 
 export PATH="/usr/lib/wsl/lib:$PATH"
 command -v nvidia-smi >/dev/null || die "nvidia-smi introuvable. Installer ou mettre à jour le pilote NVIDIA côté Windows, puis relancer WSL (wsl --shutdown)."
-GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
-DRIVER_CUDA=$(nvidia-smi | grep -oE 'CUDA Version: [0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+')
-ok "GPU : $GPU_NAME ; le pilote Windows accepte CUDA jusqu'à $DRIVER_CUDA"
+if ! SMI_OUT=$(nvidia-smi 2>&1); then
+  printf '%s\n' "$SMI_OUT" >&2
+  die "nvidia-smi échoue (sortie ci-dessus). Sous Windows : mettre à jour le pilote NVIDIA, puis dans PowerShell « wsl --shutdown », et rouvrir WSL."
+fi
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)
+DRIVER_CUDA="${DRIVER_CUDA:-$(printf '%s\n' "$SMI_OUT" | grep -oE 'CUDA Version: *[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' || true)}"
+if [ -z "$DRIVER_CUDA" ]; then
+  printf '%s\n' "$SMI_OUT" >&2
+  die "version CUDA du pilote introuvable dans la sortie de nvidia-smi (ci-dessus). Définir DRIVER_CUDA=12.8 (par exemple) et relancer."
+fi
+ok "GPU : ${GPU_NAME:-inconnu} ; le pilote Windows accepte CUDA jusqu'à $DRIVER_CUDA"
 
 # ---------------------------------------------------------------------------------------------
 step "1. Paquets système"
