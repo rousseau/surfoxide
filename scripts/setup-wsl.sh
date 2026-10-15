@@ -35,7 +35,7 @@ if ! SMI_OUT=$(nvidia-smi 2>&1); then
   die "nvidia-smi échoue (sortie ci-dessus). Sous Windows : mettre à jour le pilote NVIDIA, puis dans PowerShell « wsl --shutdown », et rouvrir WSL."
 fi
 GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)
-DRIVER_CUDA="${DRIVER_CUDA:-$(printf '%s\n' "$SMI_OUT" | grep -oE 'CUDA Version: *[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' || true)}"
+DRIVER_CUDA="${DRIVER_CUDA:-$(printf '%s\n' "$SMI_OUT" | grep -oE 'CUDA (UMD )?Version: *[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' || true)}"
 if [ -z "$DRIVER_CUDA" ]; then
   printf '%s\n' "$SMI_OUT" >&2
   die "version CUDA du pilote introuvable dans la sortie de nvidia-smi (ci-dessus). Définir DRIVER_CUDA=12.8 (par exemple) et relancer."
