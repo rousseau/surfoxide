@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from illustrate import SUBJECTS, load_surface, render_surface  # noqa: E402
+from illustrate import SUBJECTS, load_surface, show_surface  # noqa: E402
 
 
 def main():
@@ -48,7 +48,7 @@ def main():
         sys.exit(f"aucune surface {args.kind} {args.hemi} dans {args.surfaces}")
 
     meshes = [load_surface(p) for *_, p in items]
-    half = max((v.max(0) - v.min(0)).max() for v, _ in meshes) / 2 * 1.02
+    half = max((v.max(0) - v.min(0)).max() for v, _ in meshes) / 2 * 1.06
 
     n = len(items)
     cols = args.cols
@@ -58,10 +58,10 @@ def main():
     side = "gauche" if args.hemi == "L" else "droit"
     azim = 180 if args.hemi == "L" else 0
     for k, ((g, sub, ses, _), (v, f)) in enumerate(zip(items, meshes)):
-        ax = fig.add_subplot(gs[k // cols, k % cols], projection="3d")
-        render_surface(ax, v, f, (v.min(0) + v.max(0)) / 2, half, azim=azim)
-        ax.set_title(f"{g:.1f} SA", fontsize=13, pad=-4)
-        ax.text2D(0.5, 0.02, f"{sub} {ses}", transform=ax.transAxes, ha="center", fontsize=8, color="#666a72")
+        ax = fig.add_subplot(gs[k // cols, k % cols])
+        show_surface(ax, v, f, (v.min(0) + v.max(0)) / 2, half, azim=azim)
+        ax.set_title(f"{g:.1f} SA", fontsize=13, pad=2)
+        ax.text(0.5, 0.02, f"{sub} {ses}", transform=ax.transAxes, ha="center", fontsize=8, color="#666a72")
         print(f"{g:.1f} SA {sub} {ses}", flush=True)
     # Barre d'échelle dans la dernière case libre (ou sous la dernière vignette).
     k = n if n < rows * cols else n - 1
@@ -70,8 +70,7 @@ def main():
     ax.set_ylim(-half, half)
     ax.set_aspect("equal")
     ax.axis("off")
-    # Les vues 3D sont agrandies (zoom 1,6) : la barre suit le même facteur.
-    ax.plot([-5 * 1.6, 5 * 1.6], [0, 0], color="#2b2e33", lw=3, solid_capstyle="butt")
+    ax.plot([-5, 5], [0, 0], color="#2b2e33", lw=3, solid_capstyle="butt")
     ax.text(0, -half * 0.12, "10 mm", ha="center", va="top", fontsize=11)
     kind = "piales" if args.kind == "pial" else "blanches"
     fig.suptitle(f"Surfaces {kind} de l'hémisphère {side} (surfoxide), de {items[0][0]:.1f} à {items[-1][0]:.1f} SA",

@@ -29,7 +29,6 @@ import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
 from matplotlib.collections import LineCollection
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 HOME = Path.home()
 SUBJECTS = HOME / "Exp/fetal-folding-geometry/data/subjects.csv"
@@ -91,36 +90,70 @@ def vertex_convexity(vertices, faces, scale_mm=5.0):
     return conv
 
 
-def render_surface(ax, vertices, faces, center, half, azim=180, elev=8):
-    """Rendu à la FreeSurfer : gris clair sur les gyrus, gris foncé dans les sillons (couleur presque
-    binaire, comme la courbure dans Freeview), éclairage doux venant de l'observateur, normales lissées
-    pour ne pas souligner les marches de voxels ; projection orthographique."""
+def render_surface(vertices, faces, center, half, size=600, azim=180, elev=8):
+    """Image (niveaux de gris, fond blanc) de la surface vue de loin, rendu à la FreeSurfer : gris clair sur
+    les gyrus, gris foncé dans les sillons (couleur presque binaire, comme la courbure dans Freeview),
+    éclairage doux venant de l'observateur, normales lissées.
+
+    Projection orthographique avec tampon de profondeur par pixel : le tri des faces de matplotlib laisse
+    voir des faces cachées (l'insula à travers l'opercule temporal). Le cadre fait 2 `half` mm de côté
+    autour de `center`, pour que toutes les vues partagent la même échelle."""
+    az, el = np.radians(azim), np.radians(elev)
+    view = np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
+    right = np.cross([0.0, 0.0, 1.0], view)
+    right /= np.linalg.norm(right)
+    up = np.cross(view, right)
+    rel = vertices - np.asarray(center)
+    px = size / (2 * half)
+    xy = np.stack([rel @ right, rel @ up], 1) * px + size / 2
+    depth = rel @ view  # grand : proche de l'observateur
+
     conv = vertex_convexity(vertices, faces)
     mean = _neighbor_mean(faces, len(vertices))
     vn = _vertex_normals(vertices, faces)
     for _ in range(4):
         vn = mean(vn)
     vn /= np.linalg.norm(vn, axis=1, keepdims=True) + 1e-12
-    fnorm = vn[faces].mean(1)
-    fnorm /= np.linalg.norm(fnorm, axis=1, keepdims=True) + 1e-12
-    az, el = np.radians(azim), np.radians(elev)
-    view = np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
     light = view + np.array([0.0, 0.0, 0.35])
     light /= np.linalg.norm(light)
-    diffuse = np.clip(fnorm @ light, 0, 1)
-    c = conv[faces].mean(1)
-    t = 0.5 + 0.5 * np.tanh(-c / (np.percentile(np.abs(c), 50) + 1e-12) * 1.5)  # 0 : gyrus, 1 : sillon
-    base = 0.82 - 0.48 * t
-    grey = base * (0.55 + 0.45 * diffuse)
-    tri = vertices[faces]
-    col = np.stack([grey, grey, grey * 1.015, np.ones_like(grey)], 1).clip(0, 1)
-    ax.add_collection3d(Poly3DCollection(tri, facecolors=col, edgecolors="none", linewidths=0))
-    ax.set_xlim(center[0] - half, center[0] + half)
-    ax.set_ylim(center[1] - half, center[1] + half)
-    ax.set_zlim(center[2] - half, center[2] + half)
-    ax.set_box_aspect((1, 1, 1), zoom=1.6)
-    ax.view_init(elev=elev, azim=azim)
-    ax.set_proj_type("ortho")
+    diffuse = np.clip(vn @ light, 0, 1)
+    t = 0.5 + 0.5 * np.tanh(-conv / (np.percentile(np.abs(conv), 50) + 1e-12) * 1.5)  # 0 : gyrus
+    shade = (0.82 - 0.48 * t) * (0.55 + 0.45 * diffuse)
+
+    img = np.ones((size, size))
+    zbuf = np.full((size, size), -np.inf)
+    # Faces tournées vers l'observateur seulement (les autres sont cachées sur une surface fermée).
+    tri_xy = xy[faces]
+    area = ((tri_xy[:, 1, 0] - tri_xy[:, 0, 0]) * (tri_xy[:, 2, 1] - tri_xy[:, 0, 1])
+            - (tri_xy[:, 2, 0] - tri_xy[:, 0, 0]) * (tri_xy[:, 1, 1] - tri_xy[:, 0, 1]))
+    for k in np.nonzero(area > 1e-12)[0]:
+        tri = faces[k]
+        a, b, c = tri_xy[k]
+        x0, x1 = max(int(np.floor(min(a[0], b[0], c[0]))), 0), min(int(np.ceil(max(a[0], b[0], c[0]))), size - 1)
+        y0, y1 = max(int(np.floor(min(a[1], b[1], c[1]))), 0), min(int(np.ceil(max(a[1], b[1], c[1]))), size - 1)
+        if x1 < x0 or y1 < y0:
+            continue
+        X, Y = np.meshgrid(np.arange(x0, x1 + 1) + 0.5, np.arange(y0, y1 + 1) + 0.5)
+        d = area[k]
+        w0 = ((b[0] - X) * (c[1] - Y) - (c[0] - X) * (b[1] - Y)) / d
+        w1 = ((c[0] - X) * (a[1] - Y) - (a[0] - X) * (c[1] - Y)) / d
+        w2 = 1 - w0 - w1
+        m = (w0 >= 0) & (w1 >= 0) & (w2 >= 0)
+        if not m.any():
+            continue
+        z = (w0 * depth[tri[0]] + w1 * depth[tri[1]] + w2 * depth[tri[2]])[m]
+        sh = (w0 * shade[tri[0]] + w1 * shade[tri[1]] + w2 * shade[tri[2]])[m]
+        ys, xs = (Y[m] - 0.5).astype(int), (X[m] - 0.5).astype(int)
+        closer = z > zbuf[ys, xs]
+        zbuf[ys[closer], xs[closer]] = z[closer]
+        img[ys[closer], xs[closer]] = sh[closer]
+    return img[::-1]
+
+
+def show_surface(ax, vertices, faces, center, half, **kw):
+    """Affiche le rendu de [`render_surface`] dans des axes 2D."""
+    ax.imshow(render_surface(vertices, faces, center, half, **kw), cmap="gray", vmin=0, vmax=1,
+              interpolation="lanczos")
     ax.set_axis_off()
 
 
@@ -180,7 +213,7 @@ def main():
     for sub, ses, *_ in data:
         v, _ = load_surface(args.surfaces / f"{sub}_{ses}_hemi-L_pial.surf.gii")
         half3 = max(half3, (v.max(0) - v.min(0)).max() / 2)
-    half3 *= 1.02
+    half3 *= 1.08
 
     for row, (sub, ses, t2, seg, lab, lo, hi) in enumerate(data):
         a = seg.affine
@@ -232,9 +265,9 @@ def main():
         axes[0].set_ylabel(f"{g_weeks:.1f} SA\n{sub} {ses}", fontsize=11, rotation=0, ha="right", va="center", labelpad=8)
 
         # Vue 3D latérale de la piale gauche, rendu à la FreeSurfer.
-        ax3 = fig.add_subplot(gs[row, 3], projection="3d")
+        ax3 = fig.add_subplot(gs[row, 3])
         v, f = surfs[("L", "pial")]
-        render_surface(ax3, v, f, (v.min(0) + v.max(0)) / 2, half3)
+        show_surface(ax3, v, f, (v.min(0) + v.max(0)) / 2, half3)
         if row == 0:
             for ax, title in zip(axes + [ax3], ["T2w (coupe coronale)", "Segmentation BOUNTI-19",
                                                 "Surfaces surfoxide dans la coupe", "Piale gauche, vue latérale"]):
