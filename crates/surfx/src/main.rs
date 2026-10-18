@@ -6,6 +6,9 @@
 //! - `selftest` : construit des surfaces de référence et affiche leur bilan topologique.
 //! - `convert` : convertit une surface d'un format à l'autre (GIfTI, VTP, PLY, STL, FreeSurfer).
 //! - `mask` : masque blanc fermé d'un hémisphère à partir d'une segmentation (multi-)BOUNTI.
+//! - `white` : surface blanche (WM/GM) de genre 0 de chaque hémisphère, en GIfTI.
+
+mod white;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -56,6 +59,22 @@ enum Command {
         input: PathBuf,
         /// Surface écrite
         output: PathBuf,
+    },
+    /// Surface blanche de genre 0 de chaque hémisphère (GIfTI) à partir d'une segmentation
+    White {
+        /// Segmentation NIfTI
+        seg: PathBuf,
+        /// Table de labels : bounti19 ou multibounti43
+        #[arg(long, default_value = "bounti19")]
+        labels: LabelTable,
+        /// Hémisphère (L ou R) ; les deux par défaut
+        #[arg(long)]
+        hemi: Option<Hemisphere>,
+        #[command(flatten)]
+        params: white::WhiteParams,
+        /// Préfixe des fichiers écrits : <préfixe>_hemi-L_white.surf.gii
+        #[arg(long, short)]
+        out: PathBuf,
     },
     /// Masque blanc fermé d'un hémisphère (NIfTI u8) à partir d'une segmentation
     Mask {
@@ -201,6 +220,16 @@ fn main() -> ExitCode {
             hemi,
             out,
         } => run_mask(&seg, &labels, hemi, &out),
+        Command::White {
+            seg,
+            labels,
+            hemi,
+            params,
+            out,
+        } => {
+            let hemis = hemi.map_or(Hemisphere::BOTH.to_vec(), |h| vec![h]);
+            white::run(&seg, &labels, &hemis, &params, &out)
+        }
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

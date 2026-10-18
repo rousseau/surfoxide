@@ -5566,6 +5566,14 @@ name = "surfoxide-core"
 version = "0.1.0"
 
 [[package]]
+name = "surfoxide-extract"
+version = "0.1.0"
+dependencies = [
+ "surfoxide-core",
+ "surfoxide-topofix",
+]
+
+[[package]]
 name = "surfoxide-io"
 version = "0.1.0"
 dependencies = [
@@ -5601,8 +5609,10 @@ dependencies = [
  "burn",
  "clap",
  "surfoxide-core",
+ "surfoxide-extract",
  "surfoxide-io",
  "surfoxide-mask",
+ "surfoxide-topofix",
 ]
 
 [[package]]

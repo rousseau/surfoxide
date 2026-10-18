@@ -1,0 +1,10 @@
+[package]
+name = "surfoxide-extract"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+surfoxide-core = { path = "../surfoxide-core" }
+
+[dev-dependencies]
+surfoxide-topofix = { path = "../surfoxide-topofix" }
