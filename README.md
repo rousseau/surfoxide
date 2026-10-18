@@ -16,6 +16,7 @@ surfoxide fait le lien, par les données, entre deux projets :
 |---|---|
 | `surfx device` | Vérifie qu'un backend Burn calcule sur la machine (CPU, CUDA ou wgpu) |
 | `surfx selftest` | Construit une icosphère et un tore et affiche leur bilan topologique |
+| `surfx mask` | Masque blanc fermé d'un hémisphère à partir d'une segmentation BOUNTI-19 ou multi-BOUNTI-43 |
 | `surfx convert` | Convertit une surface (GIfTI, VTP, PLY, STL, FreeSurfer) et affiche son bilan topologique |
 
 ## Démarrage rapide
@@ -40,6 +41,7 @@ crates/
   surfoxide-core/   maillage, volume avec affine, adjacence, topologie, surfaces de référence ; sans Burn
   surfoxide-burn/   maillages et champs ↔ tenseurs Burn
   surfoxide-io/     NIfTI, GIfTI, VTP, PLY, STL, FreeSurfer
+  surfoxide-mask/   tables de labels (multi-)BOUNTI, masques d'hémisphère
   surfx/            binaire CLI : une sous-commande par module
 scripts/
   setup-linux.sh    préparation d'une machine Ubuntu avec GPU NVIDIA

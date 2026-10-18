@@ -5578,6 +5578,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "surfoxide-mask"
+version = "0.1.0"
+dependencies = [
+ "surfoxide-core",
+ "surfoxide-io",
+]
+
+[[package]]
 name = "surfx"
 version = "0.1.0"
 dependencies = [
@@ -5585,6 +5593,7 @@ dependencies = [
  "clap",
  "surfoxide-core",
  "surfoxide-io",
+ "surfoxide-mask",
 ]
 
 [[package]]

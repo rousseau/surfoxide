@@ -1,0 +1,10 @@
+[package]
+name = "surfoxide-mask"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+surfoxide-core = { path = "../surfoxide-core" }
+
+[dev-dependencies]
+surfoxide-io = { path = "../surfoxide-io" }

@@ -5,6 +5,7 @@
 //!   sert à valider l'installation, notamment CUDA sous WSL.
 //! - `selftest` : construit des surfaces de référence et affiche leur bilan topologique.
 //! - `convert` : convertit une surface d'un format à l'autre (GIfTI, VTP, PLY, STL, FreeSurfer).
+//! - `mask` : masque blanc fermé d'un hémisphère à partir d'une segmentation (multi-)BOUNTI.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -12,7 +13,8 @@ use std::time::Instant;
 
 use burn::prelude::{Device, Tensor, TensorData};
 use clap::{Parser, Subcommand, ValueEnum};
-use surfoxide_core::{shapes, topology_report, TriMesh};
+use surfoxide_core::{shapes, topology_report, Hemisphere, TriMesh};
+use surfoxide_mask::LabelTable;
 
 #[derive(Parser)]
 #[command(
@@ -54,6 +56,20 @@ enum Command {
         input: PathBuf,
         /// Surface écrite
         output: PathBuf,
+    },
+    /// Masque blanc fermé d'un hémisphère (NIfTI u8) à partir d'une segmentation
+    Mask {
+        /// Segmentation NIfTI
+        seg: PathBuf,
+        /// Table de labels : bounti19 ou multibounti43
+        #[arg(long, default_value = "bounti19")]
+        labels: LabelTable,
+        /// Hémisphère : L ou R
+        #[arg(long)]
+        hemi: Hemisphere,
+        /// Masque écrit
+        #[arg(long, short)]
+        out: PathBuf,
     },
 }
 
@@ -147,6 +163,28 @@ fn run_convert(input: &PathBuf, output: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+fn run_mask(
+    seg: &PathBuf,
+    table: &LabelTable,
+    hemi: Hemisphere,
+    out: &PathBuf,
+) -> Result<(), String> {
+    let (labels, header) =
+        surfoxide_io::nifti::read_labels(seg).map_err(|e| format!("{}: {e}", seg.display()))?;
+    let mask = surfoxide_mask::white_mask(&labels, table, hemi);
+    let n = mask.data().iter().filter(|&&b| b).count();
+    let s = mask.spacing();
+    println!(
+        "hémisphère {hemi} ({table}) : {n} voxels, {:.1} mL",
+        n as f64 * s[0] * s[1] * s[2] / 1000.0
+    );
+    let mask = mask.map(|&b| b as u8);
+    surfoxide_io::nifti::write_u8(out, &mask, Some(&header))
+        .map_err(|e| format!("{}: {e}", out.display()))?;
+    println!("écrit : {}", out.display());
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
@@ -157,6 +195,12 @@ fn main() -> ExitCode {
             Ok(())
         }
         Command::Convert { input, output } => run_convert(&input, &output),
+        Command::Mask {
+            seg,
+            labels,
+            hemi,
+            out,
+        } => run_mask(&seg, &labels, hemi, &out),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
