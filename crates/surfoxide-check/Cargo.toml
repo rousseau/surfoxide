@@ -1,0 +1,9 @@
+[package]
+name = "surfoxide-check"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+surfoxide-core = { path = "../surfoxide-core" }
+robust = { workspace = true }
+serde = { workspace = true }

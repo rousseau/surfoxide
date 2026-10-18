@@ -7,6 +7,7 @@
 //! - `convert` : convertit une surface d'un format à l'autre (GIfTI, VTP, PLY, STL, FreeSurfer).
 //! - `mask` : masque blanc fermé d'un hémisphère à partir d'une segmentation (multi-)BOUNTI.
 //! - `white` : surface blanche (WM/GM) de genre 0 de chaque hémisphère, en GIfTI.
+//! - `check` : contrôle du contrat d'une surface (topologie, auto-intersections) ou d'un couple WM/piale.
 
 mod white;
 
@@ -75,6 +76,20 @@ enum Command {
         /// Préfixe des fichiers écrits : <préfixe>_hemi-L_white.surf.gii
         #[arg(long, short)]
         out: PathBuf,
+    },
+    /// Contrôle le contrat d'une surface, et de son imbrication dans une autre ; rapport JSON
+    Check {
+        /// Surface contrôlée (la WM pour un couple)
+        surface: PathBuf,
+        /// Surface qui doit la contenir (piale)
+        #[arg(long)]
+        outer: Option<PathBuf>,
+        /// Épaisseur minimale exigée entre les deux surfaces (mm)
+        #[arg(long, default_value_t = 0.1)]
+        min_thickness: f64,
+        /// Rapport JSON écrit dans ce fichier (sinon sur la sortie standard)
+        #[arg(long)]
+        json: Option<PathBuf>,
     },
     /// Masque blanc fermé d'un hémisphère (NIfTI u8) à partir d'une segmentation
     Mask {
@@ -204,6 +219,38 @@ fn run_mask(
     Ok(())
 }
 
+fn run_check(
+    surface: &PathBuf,
+    outer: Option<&PathBuf>,
+    min_thickness: f64,
+    json: Option<&PathBuf>,
+) -> Result<(), String> {
+    let read =
+        |p: &PathBuf| surfoxide_io::read_mesh(p).map_err(|e| format!("{}: {e}", p.display()));
+    let mesh = read(surface)?;
+    let mut report = serde_json::json!({ "surface": surfoxide_check::check_surface(&mesh) });
+    let mut valid = report["surface"]["valid"].as_bool() == Some(true);
+    if let Some(o) = outer {
+        let outer_mesh = read(o)?;
+        let outer_report = surfoxide_check::check_surface(&outer_mesh);
+        let pair = surfoxide_check::check_pair(&mesh, &outer_mesh, min_thickness);
+        valid &= outer_report.valid && pair.valid;
+        report["outer"] = serde_json::to_value(outer_report).map_err(|e| e.to_string())?;
+        report["pair"] = serde_json::to_value(pair).map_err(|e| e.to_string())?;
+    }
+    report["valid"] = valid.into();
+    let text = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
+    match json {
+        Some(p) => std::fs::write(p, text).map_err(|e| format!("{}: {e}", p.display()))?,
+        None => println!("{text}"),
+    }
+    if valid {
+        Ok(())
+    } else {
+        Err("contrat non respecté".into())
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
@@ -220,6 +267,12 @@ fn main() -> ExitCode {
             hemi,
             out,
         } => run_mask(&seg, &labels, hemi, &out),
+        Command::Check {
+            surface,
+            outer,
+            min_thickness,
+            json,
+        } => run_check(&surface, outer.as_ref(), min_thickness, json.as_ref()),
         Command::White {
             seg,
             labels,

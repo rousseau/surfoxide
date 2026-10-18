@@ -10,6 +10,8 @@ surfoxide-io = { path = "../surfoxide-io" }
 surfoxide-mask = { path = "../surfoxide-mask" }
 surfoxide-topofix = { path = "../surfoxide-topofix" }
 surfoxide-extract = { path = "../surfoxide-extract" }
+surfoxide-check = { path = "../surfoxide-check" }
+serde_json = { workspace = true }
 burn = { workspace = true, features = ["flex"] }
 
 [features]

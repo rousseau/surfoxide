@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/surfoxide-core", "crates/surfoxide-burn", "crates/surfoxide-io", "crates/surfoxide-mask", "crates/surfoxide-topofix", "crates/surfoxide-extract", "crates/surfx"]
+members = ["crates/surfoxide-core", "crates/surfoxide-burn", "crates/surfoxide-io", "crates/surfoxide-mask", "crates/surfoxide-topofix", "crates/surfoxide-extract", "crates/surfoxide-check", "crates/surfx"]
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive", "env"] }
@@ -12,6 +12,11 @@ ndarray = "0.17"
 quick-xml = "0.38"
 base64 = "0.22"
 flate2 = "1"
+# Prédicats géométriques exacts (Shewchuk) pour les tests d'intersection.
+robust = "1"
+# Rapports JSON.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [workspace.package]
 version = "0.1.0"
