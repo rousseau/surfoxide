@@ -1,6 +1,6 @@
 name: CI
 
-# Compilation, format, lints et tests sur CPU (backend flex). Le GPU se teste sur la machine WSL.
+# Compilation, format, lints et tests sur CPU (backend flex). Le GPU se teste sur le PC Linux (RTX 2080 Ti).
 
 on:
   push:

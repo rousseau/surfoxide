@@ -47,7 +47,7 @@ Baseline de référence pour P0 : fetpype `surface_processing` (github.com/fetpy
 - Workspace Cargo ; dépendances partagées dans `[workspace.dependencies]`, `Cargo.lock` versionné.
 - Burn 0.22 (`default-features = false`) ; même version que medoxide pour un futur binaire commun.
 - CPU par défaut avec le backend `flex` (déterministe, utilisé par les tests) ; GPU par les features
-  `cuda` (machine WSL RTX 3080) ou `wgpu` (Mac).
+  `cuda` (PC Linux RTX 2080 Ti) ou `wgpu` (Mac).
 - `surfoxide-core` reste sans Burn ni format de fichier ; un crate par module ; `surfx` est la CLI.
 - Pas de dépendance sans code qui l'utilise.
 - Commentaires, documentation, messages d'erreur et noms de tests en français.
@@ -55,6 +55,11 @@ Baseline de référence pour P0 : fetpype `surface_processing` (github.com/fetpy
 
 ## Machines
 
-- Développement GPU : PC Windows RTX 3080 sous WSL (alias ssh `sshwsl` depuis le Mac, via Tailscale) ;
-  pas toujours allumé.
+- Développement (CPU et GPU) : PC Linux, Ubuntu x86_64, RTX 2080 Ti (11 Go, Turing sm_75 : f32 et f16,
+  pas de bf16), 12 cœurs, 64 Go. Installation : `scripts/setup-linux.sh` (CUDA Toolkit seul, version
+  plafonnée par le pilote).
+- Machine WSL (RTX 3080, alias ssh `sshwsl`) : secondaire, pas toujours allumée ; `scripts/setup-wsl.sh`.
 - La compilation `--features cuda` télécharge un paquet LLVM (~45 Mo) dans `~/.cache/tracel/`.
+- Données de test locales (hors Git) : BOUNTI-19 dans `~/Exp/CRL-Cinema/data/raw/bounti/`, multi-BOUNTI-43
+  dans `~/Exp/fetal-folding-geometry/.scratch/derivatives/`, atlas fœtal dHCP (GIfTI) dans
+  `~/Exp/gyroxide/data/atlas_dhcp/`.

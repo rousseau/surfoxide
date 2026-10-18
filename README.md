@@ -20,7 +20,7 @@ surfoxide fait le lien, par les données, entre deux projets :
 ## Démarrage rapide
 
 Prérequis : [Rust](https://rustup.rs) 1.95 ou plus récent. Pour le GPU NVIDIA : pilote et
-CUDA Toolkit (voir `scripts/setup-wsl.sh` pour une machine WSL).
+CUDA Toolkit (voir `scripts/setup-linux.sh` pour Ubuntu, `scripts/setup-wsl.sh` pour WSL).
 
 ```bash
 cargo test --release
@@ -39,6 +39,7 @@ crates/
   surfoxide-core/   maillage triangulaire, topologie, surfaces de référence ; sans Burn
   surfx/            binaire CLI : une sous-commande par module
 scripts/
+  setup-linux.sh    préparation d'une machine Ubuntu avec GPU NVIDIA
   setup-wsl.sh      préparation d'une machine WSL avec GPU NVIDIA
 ```
 
