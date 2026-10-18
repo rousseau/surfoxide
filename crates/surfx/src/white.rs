@@ -90,6 +90,8 @@ pub struct WhiteSurface {
     pub held: usize,
     /// Réparation après remaillage.
     pub repair: surfoxide_repair::RepairReport,
+    /// Remaillage abandonné (réparation impossible) : surface lissée non remaillée.
+    pub remesh_dropped: bool,
 }
 
 /// Surface blanche de genre 0 du masque `mask` (recadré avec une marge).
@@ -106,12 +108,21 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
         surfoxide_extract::taubin(&mut trial, 1, params.lambda, -1.06 * params.lambda);
         held += surfoxide_repair::safe_update(&mut mesh, trial.vertices());
     }
+    let smoothed = mesh.clone();
     if params.edge > 0.0 {
         mesh = surfoxide_remesh::remesh(&mesh, &surfoxide_remesh::RemeshParams::new(params.edge))
             .map_err(|_| "remaillage : surface non variété".to_string())?;
     }
-    let repair = surfoxide_repair::repair_intersections(&mut mesh, 30);
-    // Plis aigus : gênent le décalage de la piale et trahissent un artefact local.
+    let mut repair = surfoxide_repair::repair_intersections(&mut mesh, 30);
+    // Le contrat d'abord : si la réparation échoue, on garde la surface lissée (saine) non remaillée.
+    let remesh_dropped = repair.remaining > 0;
+    if remesh_dropped {
+        mesh = smoothed;
+        repair.remaining = 0;
+    }
+    // Amas de micro-triangles, puis plis aigus : gênent le décalage de la piale et trahissent un artefact
+    // local.
+    clean_short_edges(&mut mesh, 0.1 * params.edge.max(0.5));
     surfoxide_repair::relax_sharp_vertices(&mut mesh, 0.1, 20);
     Ok(WhiteSurface {
         mesh,
@@ -121,13 +132,24 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
         strategy: c.strategy,
         held,
         repair,
+        remesh_dropped,
     })
+}
+
+/// Fusionne les arêtes plus courtes que `min_len` ; ne garde le résultat que s'il reste (après
+/// réparation) sans intersection.
+fn clean_short_edges(mesh: &mut TriMesh, min_len: f64) {
+    if let Ok(mut m) = surfoxide_remesh::collapse_short_edges(mesh, min_len) {
+        if surfoxide_repair::repair_intersections(&mut m, 30).remaining == 0 {
+            *mesh = m;
+        }
+    }
 }
 
 /// Piale et champ d'épaisseur, à partir de la surface blanche.
 pub fn pial_surface(
     grids: &HemisphereGrids,
-    white: &WhiteSurface,
+    white: &mut WhiteSurface,
     args: &PialArgs,
 ) -> Result<(surfoxide_pial::Pial, usize, usize), String> {
     // L'objet blanc corrigé prime sur le cortex.
@@ -161,7 +183,35 @@ pub fn pial_surface(
         stop: args.stop,
         ..PialParams::default()
     };
-    let pial = pial_from_white(&white.mesh, &field, &params).map_err(|e| e.to_string())?;
+    // Si quelques sommets bloquent le départ de la piale, on détend localement la surface blanche
+    // (sans intersection) et on réessaie.
+    let mut attempt = 0;
+    let pial = loop {
+        match pial_from_white(&white.mesh, &field, &params) {
+            Ok(p) => break p,
+            Err(e) if attempt < 8 && !e.blocked.is_empty() => {
+                // D'abord sans créer d'intersection ; puis, pour une lame mince, lissage libre suivi
+                // d'une réparation.
+                let safe = attempt < 2;
+                clean_short_edges(&mut white.mesh, 0.05);
+                surfoxide_repair::relax_region(
+                    &mut white.mesh,
+                    &e.blocked,
+                    2 + attempt,
+                    5 * (1 + attempt),
+                    safe,
+                );
+                if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
+                    eprintln!(
+                        "piale : essai {attempt}, {} sommets bloquants",
+                        e.blocked.len()
+                    );
+                }
+                attempt += 1;
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    };
     Ok((pial, n_skeleton, iters))
 }
 
@@ -199,16 +249,28 @@ pub fn run(
     for &hemi in hemis {
         let t = Instant::now();
         let grids = hemisphere_grids(&labels, table, hemi)?;
-        let w = white_surface(&grids.white, params)?;
+        let mut w = white_surface(&grids.white, params)?;
+        // La piale peut détendre localement la surface blanche : on la construit avant d'écrire celle-ci.
+        let pial = match pial_args {
+            Some(args) => {
+                let t = Instant::now();
+                Some((
+                    pial_surface(&grids, &mut w, args)?,
+                    t.elapsed().as_secs_f64(),
+                ))
+            }
+            None => None,
+        };
         let white_report = surfoxide_check::check_surface(&w.mesh);
         println!(
-            "hémisphère {hemi}, blanche : {:?} (+{} −{} voxels) ; lissage : {} sommets retenus ; réparation : {} → {} intersections ; V={} genre={} volume={:.1} mm³ aire={:.1} mm² ; contrat {} ; {:.1} s",
+            "hémisphère {hemi}, blanche : {:?} (+{} −{} voxels) ; lissage : {} sommets retenus ; réparation : {} → {} intersections{} ; V={} genre={} volume={:.1} mm³ aire={:.1} mm² ; contrat {} ; {:.1} s",
             w.strategy,
             w.added,
             w.removed,
             w.held,
             w.repair.initial,
             w.repair.remaining,
+            if w.remesh_dropped { " (remaillage abandonné)" } else { "" },
             white_report.n_vertices,
             white_report.genus.map_or("—".into(), |g| g.to_string()),
             white_report.signed_volume,
@@ -220,11 +282,10 @@ pub fn run(
         let path = format!("{prefix}_white.surf.gii");
         surfoxide_io::gifti::write_surface(&path, &w.mesh, &meta(hemi, "GrayWhite", &labels, seg))
             .map_err(|e| format!("{path}: {e}"))?;
-        let mut report = serde_json::json!({ "white": white_report });
+        let mut report =
+            serde_json::json!({ "white": white_report, "remesh_dropped": w.remesh_dropped });
         let mut valid = white_report.valid;
-        if let Some(args) = pial_args {
-            let t = Instant::now();
-            let (pial, n_skeleton, iters) = pial_surface(&grids, &w, args)?;
+        if let Some(((pial, n_skeleton, iters), secs)) = pial {
             let pial_report = surfoxide_check::check_surface(&pial.mesh);
             let pair = surfoxide_check::check_pair(&w.mesh, &pial.mesh, min_thickness);
             let th = &pial.thickness.values;
@@ -235,7 +296,7 @@ pub fn run(
                 pair.min_distance,
                 pair.intersections,
                 if pial_report.valid && pair.valid { "respecté" } else { "NON RESPECTÉ" },
-                t.elapsed().as_secs_f64()
+                secs
             );
             valid &= pial_report.valid && pair.valid;
             let path = format!("{prefix}_pial.surf.gii");

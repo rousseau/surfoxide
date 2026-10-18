@@ -49,7 +49,7 @@ fn split_long_edges(m: &mut HalfEdgeMesh, high: f64) {
     }
 }
 
-fn collapse_short_edges(m: &mut HalfEdgeMesh, low: f64, high: f64) {
+fn collapse_short(m: &mut HalfEdgeMesh, low: f64, high: f64) {
     for h in m.edges() {
         if !m.face_alive[(h / 3) as usize] || m.edge_length(h) >= low {
             continue;
@@ -187,6 +187,17 @@ fn project(m: &mut HalfEdgeMesh, reference: &TriMesh, bvh: &Bvh, ref_normals: &[
     }
 }
 
+/// Fusionne les arêtes plus courtes que `min_len` (sous la link condition, sans retourner de face) :
+/// supprime les amas de micro-triangles sans changer la topologie. Peut créer des intersections, à
+/// réparer ensuite.
+pub fn collapse_short_edges(mesh: &TriMesh, min_len: f64) -> Result<TriMesh, NotClosedManifold> {
+    let mut m = HalfEdgeMesh::from_mesh(mesh)?;
+    for _ in 0..3 {
+        collapse_short(&mut m, min_len, f64::INFINITY);
+    }
+    Ok(m.to_mesh())
+}
+
 /// Remaille `mesh` (surface fermée 2-variété) vers des arêtes de longueur `params.target`.
 pub fn remesh(mesh: &TriMesh, params: &RemeshParams) -> Result<TriMesh, NotClosedManifold> {
     let mut m = HalfEdgeMesh::from_mesh(mesh)?;
@@ -195,7 +206,7 @@ pub fn remesh(mesh: &TriMesh, params: &RemeshParams) -> Result<TriMesh, NotClose
     let (low, high) = (0.8 * params.target, 4.0 / 3.0 * params.target);
     for _ in 0..params.iterations {
         split_long_edges(&mut m, high);
-        collapse_short_edges(&mut m, low, high);
+        collapse_short(&mut m, low, high);
         flip_edges(&mut m, params.flip_min_cos);
         tangential_relaxation(&mut m);
         project(&mut m, mesh, &bvh, &ref_normals);

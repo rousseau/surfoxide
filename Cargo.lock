@@ -5649,6 +5649,8 @@ version = "0.1.0"
 dependencies = [
  "burn",
  "clap",
+ "rayon",
+ "serde",
  "serde_json",
  "surfoxide-check",
  "surfoxide-core",

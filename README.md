@@ -18,6 +18,7 @@ surfoxide fait le lien, par les données, entre deux projets :
 | `surfx selftest` | Construit une icosphère et un tore et affiche leur bilan topologique |
 | `surfx run` | Surfaces blanche et piale de chaque hémisphère, épaisseur corticale (`.shape.gii`) et rapport de contrat JSON |
 | `surfx white` | Surface blanche de genre 0 de chaque hémisphère (GIfTI) : masque, correction topologique, marching cubes, Taubin, remaillage isotrope, réparation ; rapport de contrat JSON |
+| `surfx eval` | Distance d'une surface à la frontière de la segmentation (Hausdorff 95 %), qualité du maillage, contrat |
 | `surfx check` | Contrôle du contrat : topologie, orientation, auto-intersections ; imbrication et épaisseur WM/piale ; rapport JSON |
 | `surfx mask` | Masque blanc fermé d'un hémisphère à partir d'une segmentation BOUNTI-19 ou multi-BOUNTI-43 |
 | `surfx convert` | Convertit une surface (GIfTI, VTP, PLY, STL, FreeSurfer) et affiche son bilan topologique |
@@ -55,6 +56,7 @@ crates/
   surfx/            binaire CLI : une sous-commande par module
 scripts/
   setup-linux.sh    préparation d'une machine Ubuntu avec GPU NVIDIA
+  validate.py       validation sur la cohorte locale et comparaison à fetpype
   setup-wsl.sh      préparation d'une machine WSL avec GPU NVIDIA
 ```
 

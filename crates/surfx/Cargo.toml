@@ -14,7 +14,9 @@ surfoxide-check = { path = "../surfoxide-check" }
 surfoxide-remesh = { path = "../surfoxide-remesh" }
 surfoxide-repair = { path = "../surfoxide-repair" }
 surfoxide-pial = { path = "../surfoxide-pial" }
+serde = { workspace = true }
 serde_json = { workspace = true }
+rayon = { workspace = true }
 burn = { workspace = true, features = ["flex"] }
 
 [features]

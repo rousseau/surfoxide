@@ -334,11 +334,15 @@ pub struct Pial {
 
 /// Erreur de construction de la piale.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PialError(pub String);
+pub struct PialError {
+    pub message: String,
+    /// Sommets de la surface blanche qui bloquent (à détendre avant de réessayer).
+    pub blocked: Vec<u32>,
+}
 
 impl std::fmt::Display for PialError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)
     }
 }
 
@@ -376,34 +380,70 @@ pub fn pial_from_white(
     let mut offset = vec![params.min_offset; white.n_vertices()];
     let ring = surfoxide_core::adjacency::vertex_neighbors(white);
     let mut pial = white.clone();
-    const HALVINGS: usize = 20;
-    for attempt in 0..=HALVINGS {
-        for (i, p) in pial.vertices_mut().iter_mut().enumerate() {
-            *p = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i]));
+    // Réduction du décalage des sommets en conflit et de leurs voisins : un sommet ramené seul contre la
+    // surface blanche ferait toucher celle-ci par les faces qui le relient aux voisins restés au large.
+    // S'il reste des conflits, les sommets en cause sont rendus à l'appelant, qui peut détendre localement
+    // la surface blanche avant de réessayer.
+    const HALVINGS: usize = 12;
+    let debug = std::env::var_os("SURFOXIDE_DEBUG").is_some();
+    for (i, p) in pial.vertices_mut().iter_mut().enumerate() {
+        *p = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i]));
+    }
+    let mut bad = conflicting_vertices(&pial, Some(white));
+    let mut attempt = 0;
+    while !bad.is_empty() && attempt < HALVINGS {
+        let mut region: std::collections::HashSet<u32> = bad.clone();
+        let rings = if attempt < HALVINGS {
+            1
+        } else {
+            attempt - HALVINGS + 1
+        };
+        for _ in 0..rings {
+            let more: Vec<u32> = region
+                .iter()
+                .flat_map(|&v| ring[v as usize].iter().copied())
+                .collect();
+            region.extend(more);
         }
-        let bad = conflicting_vertices(&pial, Some(white));
-        if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
+        if attempt < HALVINGS {
+            for &v in &region {
+                offset[v as usize] /= 2.0;
+                pial.vertices_mut()[v as usize] = vec3::add(
+                    white.vertices()[v as usize],
+                    vec3::scale(normals[v as usize], offset[v as usize]),
+                );
+            }
+        } else {
+            for _ in 0..20 {
+                let pos = pial.vertices().to_vec();
+                for &v in &region {
+                    let n = &ring[v as usize];
+                    let mean = n
+                        .iter()
+                        .fold([0.0; 3], |acc, &w| vec3::add(acc, pos[w as usize]));
+                    pial.vertices_mut()[v as usize] = vec3::scale(mean, 1.0 / n.len() as f64);
+                }
+            }
+        }
+        bad = conflicting_vertices(&pial, Some(white));
+        attempt += 1;
+        if debug {
             eprintln!(
                 "décalage initial, essai {attempt} : {} sommets en conflit",
                 bad.len()
             );
         }
-        if bad.is_empty() {
-            break;
-        }
-        if attempt == HALVINGS {
-            return Err(PialError(format!(
+    }
+    if !bad.is_empty() {
+        let mut blocked: Vec<u32> = bad.iter().copied().collect();
+        blocked.sort_unstable();
+        return Err(PialError {
+            message: format!(
                 "décalage initial de la piale impossible sans intersection ({} sommets)",
                 bad.len()
-            )));
-        }
-        // On réduit aussi le décalage des voisins : un sommet ramené seul contre la surface blanche
-        // ferait toucher celle-ci par les faces qui le relient à ses voisins restés au large.
-        let mut region: std::collections::HashSet<u32> = bad.clone();
-        region.extend(bad.iter().flat_map(|&v| ring[v as usize].iter().copied()));
-        for v in region {
-            offset[v as usize] /= 2.0;
-        }
+            ),
+            blocked,
+        });
     }
     // Progression par pas le long des lignes de courant.
     let mut reached = offset.clone();

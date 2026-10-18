@@ -8,8 +8,10 @@
 //! - `mask` : masque blanc fermé d'un hémisphère à partir d'une segmentation (multi-)BOUNTI.
 //! - `white` : surface blanche (WM/GM) de genre 0 de chaque hémisphère, en GIfTI.
 //! - `run` : surfaces blanche et piale de chaque hémisphère, épaisseur et rapport de contrat.
+//! - `eval` : distance d'une surface à la frontière de la segmentation, qualité du maillage, contrat.
 //! - `check` : contrôle du contrat d'une surface (topologie, auto-intersections) ou d'un couple WM/piale.
 
+mod eval;
 mod white;
 
 use std::path::PathBuf;
@@ -98,6 +100,25 @@ enum Command {
         /// Préfixe des fichiers écrits : <préfixe>_hemi-L_{white,pial}.surf.gii, …
         #[arg(long, short)]
         out: PathBuf,
+    },
+    /// Évalue une surface contre sa segmentation : distances à la frontière, qualité, contrat (JSON)
+    Eval {
+        /// Surface évaluée
+        surface: PathBuf,
+        /// Segmentation NIfTI
+        seg: PathBuf,
+        /// Table de labels : bounti19 ou multibounti43
+        #[arg(long, default_value = "bounti19")]
+        labels: LabelTable,
+        /// Hémisphère : L ou R
+        #[arg(long)]
+        hemi: Hemisphere,
+        /// Frontière de référence
+        #[arg(long, value_enum, default_value = "white")]
+        boundary: eval::Boundary,
+        /// Rapport JSON écrit dans ce fichier (sinon sur la sortie standard)
+        #[arg(long)]
+        json: Option<PathBuf>,
     },
     /// Contrôle le contrat d'une surface, et de son imbrication dans une autre ; rapport JSON
     Check {
@@ -298,6 +319,14 @@ fn main() -> ExitCode {
             hemi,
             out,
         } => run_mask(&seg, &labels, hemi, &out),
+        Command::Eval {
+            surface,
+            seg,
+            labels,
+            hemi,
+            boundary,
+            json,
+        } => eval::run(&surface, &seg, &labels, hemi, boundary, json.as_deref()),
         Command::Check {
             surface,
             outer,

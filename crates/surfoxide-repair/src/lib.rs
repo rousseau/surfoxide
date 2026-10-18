@@ -149,6 +149,47 @@ pub fn sharp_vertices(mesh: &TriMesh, min_cos: f64) -> Vec<u32> {
         .collect()
 }
 
+/// Lisse (laplacien, pas 1/2) les sommets `seeds` et leurs `rings` premiers anneaux, `iterations` fois.
+/// Avec `safe`, aucun pas ne crée d'intersection ; sans, les intersections créées sont réparées ensuite
+/// par [`repair_intersections`] (utile pour une lame mince que tout déplacement sûr laisse en place).
+pub fn relax_region(
+    mesh: &mut TriMesh,
+    seeds: &[u32],
+    rings: usize,
+    iterations: usize,
+    safe: bool,
+) {
+    let nb = vertex_neighbors(mesh);
+    let mut region: HashSet<u32> = seeds.iter().copied().collect();
+    for _ in 0..rings {
+        let ring: Vec<u32> = region
+            .iter()
+            .flat_map(|&v| nb[v as usize].iter().copied())
+            .collect();
+        region.extend(ring);
+    }
+    for _ in 0..iterations {
+        let v = mesh.vertices().to_vec();
+        let mut new = v.clone();
+        for &i in &region {
+            let n = &nb[i as usize];
+            let mean = n
+                .iter()
+                .fold([0.0; 3], |acc, &j| vec3::add(acc, v[j as usize]));
+            new[i as usize] =
+                vec3::lerp(v[i as usize], vec3::scale(mean, 1.0 / n.len() as f64), 0.5);
+        }
+        if safe {
+            safe_update(mesh, &new);
+        } else {
+            mesh.vertices_mut().copy_from_slice(&new);
+        }
+    }
+    if !safe {
+        repair_intersections(mesh, 30);
+    }
+}
+
 /// Détend les sommets anguleux (et leur premier anneau) par lissage laplacien local, sans créer
 /// d'intersection. Rend le nombre de sommets anguleux restants.
 pub fn relax_sharp_vertices(mesh: &mut TriMesh, min_cos: f64, rounds: usize) -> usize {

@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Validation de surfoxide sur la cohorte locale et comparaison à fetpype `surface_processing`.
+
+Pour une session par semaine d'âge gestationnel (BOUNTI-19) : `surfx run` (WM et piale), puis
+`surfx eval` contre trois références (masque blanc de surfoxide, tissu blanc brut, masque blanc ∪
+cortex pour la piale). fetpype (image docker macatools/surf_proc:v0.0.1e) est lancé sur les mêmes
+sessions et évalué de la même façon. Quelques sessions multi-BOUNTI-43 complètent.
+
+Usage :
+    python3 scripts/validate.py --out ~/scratch/surfoxide-validation [--jobs 6] [--no-fetpype]
+        [--reuse-fetpype ancien/results.json]
+
+Bibliothèque standard seulement. Les résultats (surfaces, rapports) restent hors du dépôt.
+"""
+
+import argparse
+import concurrent.futures as cf
+import csv
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME = Path.home()
+BOUNTI = HOME / "Exp/CRL-Cinema/data/raw/bounti"
+MULTI = HOME / "Exp/fetal-folding-geometry/.scratch/derivatives/fetal-folding-geometry"
+SUBJECTS = HOME / "Exp/fetal-folding-geometry/data/subjects.csv"
+FETPYPE_IMAGE = "macatools/surf_proc:v0.0.1e"
+FETPYPE_LABELS = {"L": "5,7,14,16", "R": "6,8,15,17"}
+FAILED_MULTI = {("sub-cq1rl", "ses-01")}
+REPO = Path(__file__).resolve().parent.parent
+SURFX = REPO / "target/release/surfx"
+
+
+def seg_path(sub, ses, kind):
+    if kind == "bounti19":
+        return BOUNTI / sub / ses / "anat" / f"{sub}_{ses}_res-0p5mm_desc-bounti19_dseg.nii.gz"
+    return MULTI / sub / ses / "anat" / f"{sub}_{ses}_res-0p5mm_desc-multibounti43_dseg.nii.gz"
+
+
+def select_sessions():
+    """Une session par semaine entière d'AG (la première par identifiant), dont la segmentation existe."""
+    rows = sorted(csv.DictReader(open(SUBJECTS)), key=lambda r: (r["subject_id"], r["session_id"]))
+    by_week = {}
+    for r in rows:
+        week = int(float(r["ga_weeks"]))
+        if week not in by_week and seg_path(r["subject_id"], r["session_id"], "bounti19").exists():
+            by_week[week] = (r["subject_id"], r["session_id"], float(r["ga_weeks"]))
+    return [by_week[w] for w in sorted(by_week)]
+
+
+def run(cmd, **kw):
+    t = time.time()
+    p = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    return p, time.time() - t
+
+
+def evaluate(surface, seg, labels, hemi, boundary):
+    p, _ = run([SURFX, "eval", surface, seg, "--labels", labels, "--hemi", hemi,
+                "--boundary", boundary])
+    if p.returncode != 0:
+        return {"error": p.stderr.strip()}
+    return json.loads(p.stdout)
+
+
+def surfoxide_session(out, sub, ses, ga, labels):
+    seg = seg_path(sub, ses, labels)
+    prefix = out / "surfoxide" / labels / f"{sub}_{ses}"
+    prefix.parent.mkdir(parents=True, exist_ok=True)
+    p, secs = run([SURFX, "run", seg, "--labels", labels, "-o", prefix])
+    res = {"sub": sub, "ses": ses, "ga": ga, "labels": labels, "method": "surfoxide",
+           "seconds": secs, "returncode": p.returncode, "log": p.stdout + p.stderr, "hemi": {}}
+    for hemi in "LR":
+        h = {}
+        rep = Path(f"{prefix}_hemi-{hemi}_report.json")
+        if rep.exists():
+            h["report"] = json.loads(rep.read_text())
+        white = f"{prefix}_hemi-{hemi}_white.surf.gii"
+        pial = f"{prefix}_hemi-{hemi}_pial.surf.gii"
+        if Path(white).exists():
+            h["white_vs_white"] = evaluate(white, seg, labels, hemi, "white")
+            h["white_vs_tissue"] = evaluate(white, seg, labels, hemi, "tissue")
+        if Path(pial).exists():
+            h["pial_vs_pial"] = evaluate(pial, seg, labels, hemi, "pial")
+            h["pial_vs_opened"] = evaluate(pial, seg, labels, hemi, "pial-opened")
+        res["hemi"][hemi] = h
+    return res
+
+
+def fetpype_hemi(out, sub, ses, hemi):
+    seg = seg_path(sub, ses, "bounti19")
+    dest = out / "fetpype"
+    dest.mkdir(parents=True, exist_ok=True)
+    name = f"{sub}_{ses}_hemi-{hemi}_white.gii"
+    p, secs = run(["docker", "run", "--rm", "-u", f"{os.getuid()}:{os.getgid()}",
+                   "-e", "HOME=/tmp", "-e", "NUMBA_CACHE_DIR=/tmp",
+                   "-v", f"{seg.parent}:/in:ro", "-v", f"{dest}:/out", FETPYPE_IMAGE,
+                   "python3", "generate_mesh.py", "-s", f"/in/{seg.name}",
+                   "-l", FETPYPE_LABELS[hemi], "-m", f"/out/{name}"])
+    h = {"seconds": secs, "returncode": p.returncode}
+    if (dest / name).exists():
+        h["white_vs_white"] = evaluate(dest / name, seg, "bounti19", hemi, "white")
+        h["white_vs_tissue"] = evaluate(dest / name, seg, "bounti19", hemi, "tissue")
+    else:
+        h["error"] = p.stderr[-2000:]
+    return hemi, h
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--jobs", type=int, default=6, help="conteneurs fetpype en parallèle")
+    ap.add_argument("--no-fetpype", action="store_true")
+    ap.add_argument("--multi", type=int, default=4, help="sessions multi-BOUNTI-43")
+    ap.add_argument("--reuse-fetpype", type=Path,
+                    help="results.json d'une exécution précédente dont on reprend les résultats fetpype")
+    args = ap.parse_args()
+    args.out.mkdir(parents=True, exist_ok=True)
+    if not SURFX.exists():
+        sys.exit("compiler d'abord : cargo build --release")
+    sessions = select_sessions()
+    print(f"{len(sessions)} sessions BOUNTI-19 ({sessions[0][2]:.1f} à {sessions[-1][2]:.1f} SA)")
+    results = []
+
+    fetpype_futures = {}
+    pool = cf.ThreadPoolExecutor(max_workers=args.jobs)
+    if not args.no_fetpype:
+        for sub, ses, ga in sessions:
+            for hemi in "LR":
+                fetpype_futures[pool.submit(fetpype_hemi, args.out, sub, ses, hemi)] = (sub, ses, ga)
+
+    for sub, ses, ga in sessions:
+        r = surfoxide_session(args.out, sub, ses, ga, "bounti19")
+        print(f"surfoxide {sub} {ses} ({ga:.1f} SA) : {r['seconds']:.0f} s, code {r['returncode']}",
+              flush=True)
+        results.append(r)
+
+    # Multi-BOUNTI : sessions réparties sur la plage d'AG.
+    multi = [s for s in sessions if (s[0], s[1]) not in FAILED_MULTI and seg_path(s[0], s[1], "multibounti43").exists()]
+    step = max(1, len(multi) // max(1, args.multi))
+    for sub, ses, ga in multi[::step][: args.multi]:
+        r = surfoxide_session(args.out, sub, ses, ga, "multibounti43")
+        print(f"surfoxide multi-BOUNTI {sub} {ses} ({ga:.1f} SA) : {r['seconds']:.0f} s, code {r['returncode']}",
+              flush=True)
+        results.append(r)
+
+    fet = {}
+    for fut in cf.as_completed(fetpype_futures):
+        sub, ses, ga = fetpype_futures[fut]
+        hemi, h = fut.result()
+        key = (sub, ses)
+        fet.setdefault(key, {"sub": sub, "ses": ses, "ga": ga, "labels": "bounti19",
+                             "method": "fetpype", "seconds": 0.0, "hemi": {}})
+        fet[key]["hemi"][hemi] = h
+        fet[key]["seconds"] += h["seconds"]
+        print(f"fetpype {sub} {ses} {hemi} : {h['seconds']:.0f} s", flush=True)
+    results.extend(fet.values())
+    pool.shutdown()
+    if args.reuse_fetpype:
+        results.extend(r for r in json.loads(args.reuse_fetpype.read_text()) if r["method"] == "fetpype")
+
+    dest = args.out / "results.json"
+    if dest.exists():
+        dest.rename(args.out / "results.previous.json")
+    dest.write_text(json.dumps(results, indent=1))
+    print(f"écrit : {dest}")
+
+
+if __name__ == "__main__":
+    main()

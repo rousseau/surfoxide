@@ -3,6 +3,7 @@
 //! - auto-intersections (hiérarchie de boîtes [`bvh::Bvh`] et tests exacts de [`predicates`]) ;
 //! - intersections entre deux surfaces (WM et piale) ;
 //! - distances d'une surface à l'autre (épaisseur minimale), inclusion par l'indice d'enroulement ;
+//! - qualité du maillage ([`quality`]) ;
 //! - rapports [`SurfaceReport`] et [`PairReport`], sérialisables en JSON.
 //!
 //! Deux triangles qui partagent un sommet `v` et ne sont pas coplanaires se coupent ailleurs qu'en `v`
@@ -18,6 +19,7 @@ use surfoxide_core::{topology_report, TriMesh};
 pub mod bvh;
 pub mod distance;
 pub mod predicates;
+pub mod quality;
 
 use bvh::Bvh;
 use predicates::{
