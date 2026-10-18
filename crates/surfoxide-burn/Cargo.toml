@@ -1,0 +1,11 @@
+[package]
+name = "surfoxide-burn"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+burn = { workspace = true }
+surfoxide-core = { path = "../surfoxide-core" }
+
+[dev-dependencies]
+burn = { workspace = true, features = ["flex"] }

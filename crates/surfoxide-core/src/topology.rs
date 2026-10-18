@@ -22,6 +22,8 @@ pub struct TopologyReport {
     pub non_manifold_edges: usize,
     /// Arêtes partagées par deux faces qui les parcourent dans le même sens (orientation incohérente).
     pub inconsistent_edges: usize,
+    /// Sommets dont les faces incidentes forment plusieurs éventails (« sablier » en un sommet).
+    pub non_manifold_vertices: usize,
     /// Composantes connexes (par les faces).
     pub components: usize,
     /// Caractéristique d'Euler V − E + F, calculée sur les sommets référencés.
@@ -29,14 +31,16 @@ pub struct TopologyReport {
 }
 
 impl TopologyReport {
-    /// Vrai si la surface est fermée, 2-variété par les arêtes et orientée de façon cohérente.
+    /// Vrai si la surface est fermée, 2-variété (par les arêtes et par les sommets) et orientée de façon
+    /// cohérente.
     pub fn is_closed_oriented_manifold(&self) -> bool {
-        self.boundary_edges == 0 && self.non_manifold_edges == 0 && self.inconsistent_edges == 0
+        self.boundary_edges == 0
+            && self.non_manifold_edges == 0
+            && self.inconsistent_edges == 0
+            && self.non_manifold_vertices == 0
     }
 
     /// Genre d'une surface fermée, orientée et d'un seul tenant : g = (2 − χ) / 2. `None` sinon.
-    ///
-    /// La variété aux sommets (pas de « sablier » en un sommet) n'est pas encore vérifiée.
     pub fn genus(&self) -> Option<i64> {
         if self.is_closed_oriented_manifold()
             && self.components == 1
@@ -114,6 +118,8 @@ pub fn topology_report(mesh: &TriMesh) -> TopologyReport {
         .filter(|&v| used[v as usize] && find(&mut parent, v) == v)
         .count();
 
+    let non_manifold_vertices = count_non_manifold_vertices(mesh);
+
     TopologyReport {
         n_vertices: mesh.n_vertices(),
         n_edges: edges.len(),
@@ -122,9 +128,60 @@ pub fn topology_report(mesh: &TriMesh) -> TopologyReport {
         boundary_edges,
         non_manifold_edges,
         inconsistent_edges,
+        non_manifold_vertices,
         components,
         euler_characteristic: n_used as i64 - edges.len() as i64 + faces.len() as i64,
     }
+}
+
+/// Compte les sommets dont les faces incidentes ne forment pas un seul éventail : on relie deux faces
+/// incidentes au sommet si elles partagent une arête issue de ce sommet, et on compte les groupes.
+fn count_non_manifold_vertices(mesh: &TriMesh) -> usize {
+    let vf = crate::adjacency::vertex_faces(mesh);
+    let faces = mesh.faces();
+    let mut count = 0;
+    let mut groups: Vec<usize> = Vec::new();
+    for (v, incident) in vf.iter().enumerate() {
+        if incident.len() < 2 {
+            continue;
+        }
+        let v = v as u32;
+        // Union-find local sur les faces incidentes.
+        groups.clear();
+        groups.extend(0..incident.len());
+        fn root(g: &mut [usize], mut x: usize) -> usize {
+            while g[x] != x {
+                g[x] = g[g[x]];
+                x = g[x];
+            }
+            x
+        }
+        // Les autres sommets de chaque face incidente : deux faces partageant l'un d'eux partagent une arête.
+        let mut by_other: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+        for (slot, &fi) in incident.iter().enumerate() {
+            for &w in &faces[fi as usize] {
+                if w == v {
+                    continue;
+                }
+                match by_other.entry(w) {
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(slot);
+                    }
+                    std::collections::hash_map::Entry::Occupied(e) => {
+                        let (a, b) = (root(&mut groups, *e.get()), root(&mut groups, slot));
+                        groups[a] = b;
+                    }
+                }
+            }
+        }
+        let n_groups = (0..incident.len())
+            .filter(|&i| root(&mut groups, i) == i)
+            .count();
+        if n_groups > 1 {
+            count += 1;
+        }
+    }
+    count
 }
 
 #[cfg(test)]
@@ -168,6 +225,28 @@ mod tests {
         let mesh = TriMesh::new(sphere.vertices().to_vec(), faces).unwrap();
         let r = topology_report(&mesh);
         assert_eq!(r.inconsistent_edges, 3);
+        assert!(!r.is_closed_oriented_manifold());
+    }
+
+    #[test]
+    fn sablier_en_un_sommet_detecte() {
+        // Deux tétraèdres qui ne partagent qu'un sommet : arêtes manifold, sommet non manifold.
+        let tet = |o: [f64; 3], s: f64| {
+            vec![
+                o,
+                [o[0] + s, o[1], o[2]],
+                [o[0], o[1] + s, o[2]],
+                [o[0], o[1], o[2] + s],
+            ]
+        };
+        let mut vertices = tet([0.0; 3], 1.0);
+        vertices.extend(tet([0.0; 3], -1.0).into_iter().skip(1));
+        let t = |a: u32, b: u32, c: u32, d: u32| [[a, c, b], [a, b, d], [a, d, c], [b, c, d]];
+        let mut faces = t(0, 1, 2, 3).to_vec();
+        faces.extend(t(0, 4, 5, 6).iter().map(|f| [f[0], f[2], f[1]]));
+        let r = topology_report(&TriMesh::new(vertices, faces).unwrap());
+        assert_eq!(r.non_manifold_edges, 0);
+        assert_eq!(r.non_manifold_vertices, 1);
         assert!(!r.is_closed_oriented_manifold());
     }
 

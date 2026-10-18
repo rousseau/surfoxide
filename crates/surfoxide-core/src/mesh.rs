@@ -74,6 +74,16 @@ impl TriMesh {
         &self.faces
     }
 
+    /// Accès en écriture aux positions : déplacer des sommets ne change pas la topologie.
+    pub fn vertices_mut(&mut self) -> &mut [[f64; 3]] {
+        &mut self.vertices
+    }
+
+    /// Démonte le maillage en (sommets, faces).
+    pub fn into_parts(self) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
+        (self.vertices, self.faces)
+    }
+
     pub fn n_vertices(&self) -> usize {
         self.vertices.len()
     }

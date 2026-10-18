@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/surfoxide-core", "crates/surfx"]
+members = ["crates/surfoxide-core", "crates/surfoxide-burn", "crates/surfx"]
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive", "env"] }
