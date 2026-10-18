@@ -16,6 +16,7 @@ surfoxide fait le lien, par les données, entre deux projets :
 |---|---|
 | `surfx device` | Vérifie qu'un backend Burn calcule sur la machine (CPU, CUDA ou wgpu) |
 | `surfx selftest` | Construit une icosphère et un tore et affiche leur bilan topologique |
+| `surfx convert` | Convertit une surface (GIfTI, VTP, PLY, STL, FreeSurfer) et affiche son bilan topologique |
 
 ## Démarrage rapide
 
@@ -36,7 +37,9 @@ La première compilation avec `--features cuda` télécharge un paquet LLVM d'en
 
 ```
 crates/
-  surfoxide-core/   maillage triangulaire, topologie, surfaces de référence ; sans Burn
+  surfoxide-core/   maillage, volume avec affine, adjacence, topologie, surfaces de référence ; sans Burn
+  surfoxide-burn/   maillages et champs ↔ tenseurs Burn
+  surfoxide-io/     NIfTI, GIfTI, VTP, PLY, STL, FreeSurfer
   surfx/            binaire CLI : une sous-commande par module
 scripts/
   setup-linux.sh    préparation d'une machine Ubuntu avec GPU NVIDIA

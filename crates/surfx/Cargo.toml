@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 clap = { workspace = true }
 surfoxide-core = { path = "../surfoxide-core" }
+surfoxide-io = { path = "../surfoxide-io" }
 burn = { workspace = true, features = ["flex"] }
 
 [features]

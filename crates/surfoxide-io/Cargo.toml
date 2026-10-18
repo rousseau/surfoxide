@@ -1,0 +1,12 @@
+[package]
+name = "surfoxide-io"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+surfoxide-core = { path = "../surfoxide-core" }
+nifti = { workspace = true }
+ndarray = { workspace = true }
+quick-xml = { workspace = true }
+base64 = { workspace = true }
+flate2 = { workspace = true }

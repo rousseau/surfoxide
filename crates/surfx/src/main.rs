@@ -4,7 +4,9 @@
 //! - `device` : vérifie qu'un backend Burn calcule sur la machine (CPU, ou GPU via `cuda` / `wgpu`) ;
 //!   sert à valider l'installation, notamment CUDA sous WSL.
 //! - `selftest` : construit des surfaces de référence et affiche leur bilan topologique.
+//! - `convert` : convertit une surface d'un format à l'autre (GIfTI, VTP, PLY, STL, FreeSurfer).
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -46,6 +48,13 @@ enum Command {
     },
     /// Construit une icosphère et un tore et affiche leur bilan topologique
     Selftest,
+    /// Convertit une surface ; formats déduits des extensions (.gii, .vtp, .ply, .stl, sinon FreeSurfer)
+    Convert {
+        /// Surface lue
+        input: PathBuf,
+        /// Surface écrite
+        output: PathBuf,
+    },
 }
 
 fn device_for(backend: BackendArg) -> Result<Device, String> {
@@ -130,6 +139,14 @@ fn print_report(name: &str, mesh: &TriMesh) {
     );
 }
 
+fn run_convert(input: &PathBuf, output: &PathBuf) -> Result<(), String> {
+    let mesh = surfoxide_io::read_mesh(input).map_err(|e| format!("{}: {e}", input.display()))?;
+    print_report(&input.display().to_string(), &mesh);
+    surfoxide_io::write_mesh(output, &mesh).map_err(|e| format!("{}: {e}", output.display()))?;
+    println!("écrit : {}", output.display());
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
@@ -139,6 +156,7 @@ fn main() -> ExitCode {
             print_report("tore (48×24)", &shapes::torus(48, 24, 3.0, 1.0));
             Ok(())
         }
+        Command::Convert { input, output } => run_convert(&input, &output),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

@@ -1,10 +1,17 @@
 [workspace]
 resolver = "2"
-members = ["crates/surfoxide-core", "crates/surfoxide-burn", "crates/surfx"]
+members = ["crates/surfoxide-core", "crates/surfoxide-burn", "crates/surfoxide-io", "crates/surfx"]
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive", "env"] }
 burn = { version = "0.22.0", default-features = false, features = ["std"] }
+# Mêmes versions que medoxide (un seul ndarray dans un futur binaire commun).
+nifti = "0.18"
+ndarray = "0.17"
+# GIfTI : XML, données encodées en base64, éventuellement compressées (gzip/zlib).
+quick-xml = "0.38"
+base64 = "0.22"
+flate2 = "1"
 
 [workspace.package]
 version = "0.1.0"
