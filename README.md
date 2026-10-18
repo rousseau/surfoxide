@@ -16,6 +16,7 @@ surfoxide fait le lien, par les données, entre deux projets :
 |---|---|
 | `surfx device` | Vérifie qu'un backend Burn calcule sur la machine (CPU, CUDA ou wgpu) |
 | `surfx selftest` | Construit une icosphère et un tore et affiche leur bilan topologique |
+| `surfx run` | Surfaces blanche et piale de chaque hémisphère, épaisseur corticale (`.shape.gii`) et rapport de contrat JSON |
 | `surfx white` | Surface blanche de genre 0 de chaque hémisphère (GIfTI) : masque, correction topologique, marching cubes, Taubin, remaillage isotrope, réparation ; rapport de contrat JSON |
 | `surfx check` | Contrôle du contrat : topologie, orientation, auto-intersections ; imbrication et épaisseur WM/piale ; rapport JSON |
 | `surfx mask` | Masque blanc fermé d'un hémisphère à partir d'une segmentation BOUNTI-19 ou multi-BOUNTI-43 |
@@ -29,6 +30,7 @@ CUDA Toolkit (voir `scripts/setup-linux.sh` pour Ubuntu, `scripts/setup-wsl.sh` 
 ```bash
 cargo test --release
 cargo run --release -- selftest
+cargo run --release -- run sub-01_dseg.nii.gz -o out/sub-01       # WM et piale par hémisphère
 cargo run --release -- device                                   # CPU
 cargo run --release --features cuda -- device --backend cuda    # GPU NVIDIA
 ```
@@ -49,6 +51,7 @@ crates/
   surfoxide-check/  BVH, intersections exactes, distances, rapport de contrat
   surfoxide-remesh/ remaillage isotrope (Botsch–Kobbelt) sur une table des coins modifiable
   surfoxide-repair/ suppression des auto-intersections par déplacement de sommets
+  surfoxide-pial/   piale par les lignes de courant du champ de Laplace, sillons enfouis
   surfx/            binaire CLI : une sous-commande par module
 scripts/
   setup-linux.sh    préparation d'une machine Ubuntu avec GPU NVIDIA

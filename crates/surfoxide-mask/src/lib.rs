@@ -208,12 +208,23 @@ pub fn tissue_mask(
 /// Masque blanc fermé d'un hémisphère : tissu [`Tissue::White`] du côté, plus grande composante
 /// 26-connexe, cavités (au sens 6-connexe du fond) remplies.
 pub fn white_mask(labels: &Volume<i32>, table: &LabelTable, hemi: Hemisphere) -> Volume<bool> {
+    hemisphere_masks(labels, table, hemi).0
+}
+
+/// Masque blanc fermé (comme [`white_mask`]) et masque du cortex d'un hémisphère.
+pub fn hemisphere_masks(
+    labels: &Volume<i32>,
+    table: &LabelTable,
+    hemi: Hemisphere,
+) -> (Volume<bool>, Volume<bool>) {
     let sides = assign_sides(labels, table);
     let raw = tissue_mask(labels, &sides, table, Tissue::White, hemi);
-    fill_cavities(
+    let white = fill_cavities(
         &largest_component(&raw, Connectivity::TwentySix),
         Connectivity::Six,
-    )
+    );
+    let cortex = tissue_mask(labels, &sides, table, Tissue::CorticalGm, hemi);
+    (white, cortex)
 }
 
 #[cfg(test)]

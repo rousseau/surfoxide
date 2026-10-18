@@ -25,16 +25,18 @@ https://claude.ai/code/artifact/492fa76d-b8bf-4ad7-bf59-796739415874
 ## Priorités (voir le document de référence)
 
 P0, des surfaces utilisables par gyroxide :
-1. Types de base (`TriMesh`, champs par sommet, conversion vers tenseurs Burn) — commencé.
-2. Entrées-sorties : NIfTI (segmentations), GIfTI, VTK `.vtp`, PLY/STL, surfaces FreeSurfer.
-3. Masque d'hémisphère fermé à partir des labels BOUNTI (19 régions) et multi-BOUNTI.
-4. Correction topologique voxelique (Bazin, fast marching).
-5. Marching cubes à topologie cohérente, lissage de Taubin.
-6. Remaillage isotrope.
-7. Contrôles géométriques : topologie (fait : `topology.rs`), auto-intersections (AABB + tests
-   triangle–triangle), distance minimale WM–piale.
-8. Réparation locale des faces fautives.
-9. Piale sans apprentissage : gonflement de la WM vers la frontière cortex/LCR (flot déterministe).
+1. Types de base (`TriMesh`, `Volume`, champs par sommet, conversion vers tenseurs Burn) — fait.
+2. Entrées-sorties : NIfTI (segmentations), GIfTI, VTK `.vtp`, PLY/STL, surfaces FreeSurfer — fait.
+3. Masque d'hémisphère fermé à partir des labels BOUNTI (19 régions) et multi-BOUNTI — fait.
+4. Correction topologique voxelique (Bazin, fast marching) — fait.
+5. Marching cubes à topologie cohérente, lissage de Taubin — fait.
+6. Remaillage isotrope — fait.
+7. Contrôles géométriques : topologie, auto-intersections (AABB + tests triangle–triangle exacts),
+   distance minimale WM–piale — fait (`surfoxide-check`).
+8. Réparation locale des faces fautives — fait (déplacement de sommets uniquement).
+9. Piale sans apprentissage : gonflement de la WM vers la frontière cortex/LCR (flot déterministe) — fait :
+   lignes de courant du champ de Laplace, sillons enfouis ouverts par leur nappe médiane.
+Reste : validation sur la cohorte et comparaison à fetpype (plan, jalon J10).
 
 P1 : intégrateur ODE dans Burn, réseaux de déformation à la CoSeg (faiblement supervisés par les
 segmentations de medoxide), opérateurs différentiels, métriques (épaisseur, profondeur sulcale,

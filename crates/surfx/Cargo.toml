@@ -13,6 +13,7 @@ surfoxide-extract = { path = "../surfoxide-extract" }
 surfoxide-check = { path = "../surfoxide-check" }
 surfoxide-remesh = { path = "../surfoxide-remesh" }
 surfoxide-repair = { path = "../surfoxide-repair" }
+surfoxide-pial = { path = "../surfoxide-pial" }
 serde_json = { workspace = true }
 burn = { workspace = true, features = ["flex"] }
 

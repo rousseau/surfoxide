@@ -4,13 +4,15 @@
 use crate::Volume;
 
 /// Distance au carré, sur une ligne, de chaque point au point de coût minimal : `min_q f(q) + (s (p − q))²`.
-fn edt_1d(f: &[f64], s: f64, out: &mut [f64], v: &mut [usize], z: &mut [f64]) {
+/// `arg[p]` reçoit le `q` qui réalise le minimum.
+fn edt_1d(f: &[f64], s: f64, out: &mut [f64], arg: &mut [usize], v: &mut [usize], z: &mut [f64]) {
     let n = f.len();
     let s2 = s * s;
     let mut k = 0usize;
     // Premier point fini.
     let Some(first) = f.iter().position(|x| x.is_finite()) else {
         out.fill(f64::INFINITY);
+        arg.iter_mut().enumerate().for_each(|(q, a)| *a = q);
         return;
     };
     v[0] = first;
@@ -48,12 +50,19 @@ fn edt_1d(f: &[f64], s: f64, out: &mut [f64], v: &mut [usize], z: &mut [f64]) {
         }
         let d = s * (q as f64 - v[k] as f64);
         *o = d * d + f[v[k]];
+        arg[q] = v[k];
     }
 }
 
 /// Distance euclidienne au carré (mm²) de chaque voxel au voxel `true` le plus proche de `mask`
 /// (infini si le masque est vide).
 pub fn edt_squared(mask: &Volume<bool>) -> Volume<f64> {
+    feature_transform(mask).0
+}
+
+/// Transformée de distance avec plus proches voisins : distance au carré (mm²) de chaque voxel au voxel
+/// `true` le plus proche, et indice linéaire de ce voxel (`u32::MAX` si le masque est vide).
+pub fn feature_transform(mask: &Volume<bool>) -> (Volume<f64>, Volume<u32>) {
     let dims = mask.dims();
     let spacing = mask.spacing();
     let mut d: Vec<f64> = mask
@@ -61,9 +70,13 @@ pub fn edt_squared(mask: &Volume<bool>) -> Volume<f64> {
         .iter()
         .map(|&b| if b { 0.0 } else { f64::INFINITY })
         .collect();
+    let mut feat: Vec<u32> = (0..mask.len() as u32)
+        .map(|i| if mask.data()[i as usize] { i } else { u32::MAX })
+        .collect();
     let stride = [1, dims[0], dims[0] * dims[1]];
     let nmax = *dims.iter().max().unwrap_or(&0);
     let (mut f, mut out) = (vec![0.0; nmax], vec![0.0; nmax]);
+    let (mut arg, mut line_feat) = (vec![0usize; nmax], vec![0u32; nmax]);
     let (mut v, mut z) = (vec![0usize; nmax], vec![0.0; nmax + 1]);
     for axis in 0..3 {
         let n = dims[axis];
@@ -73,15 +86,24 @@ pub fn edt_squared(mask: &Volume<bool>) -> Volume<f64> {
                 let base = ja * stride[a] + jb * stride[b];
                 for q in 0..n {
                     f[q] = d[base + q * stride[axis]];
+                    line_feat[q] = feat[base + q * stride[axis]];
                 }
-                edt_1d(&f[..n], spacing[axis], &mut out[..n], &mut v, &mut z);
+                edt_1d(
+                    &f[..n],
+                    spacing[axis],
+                    &mut out[..n],
+                    &mut arg[..n],
+                    &mut v,
+                    &mut z,
+                );
                 for q in 0..n {
                     d[base + q * stride[axis]] = out[q];
+                    feat[base + q * stride[axis]] = line_feat[arg[q]];
                 }
             }
         }
     }
-    mask.with_data(d)
+    (mask.with_data(d), mask.with_data(feat))
 }
 
 /// Fonction distance signée (mm) : négative à l'intérieur (distance au fond le plus proche), positive à
@@ -148,6 +170,22 @@ mod tests {
         let d = edt_squared(&m);
         for (a, b) in d.data().iter().zip(brute(&m)) {
             assert!((a - b).abs() < 1e-9, "{a} contre {b}");
+        }
+    }
+
+    #[test]
+    fn plus_proches_voisins() {
+        let mut m = Volume::filled([9, 7, 6], false, IDENTITY);
+        for (i, j, k) in [(1, 1, 1), (7, 2, 4), (3, 6, 2)] {
+            m.set(i, j, k, true);
+        }
+        let (d, feat) = feature_transform(&m);
+        for idx in 0..m.len() {
+            let f = feat.data()[idx] as usize;
+            assert!(m.data()[f]);
+            let (c, q) = (m.coords(idx), m.coords(f));
+            let d2: f64 = (0..3).map(|a| (c[a] as f64 - q[a] as f64).powi(2)).sum();
+            assert_eq!(d2, d.data()[idx]);
         }
     }
 

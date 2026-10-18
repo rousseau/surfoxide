@@ -7,6 +7,7 @@
 //! - `convert` : convertit une surface d'un format à l'autre (GIfTI, VTP, PLY, STL, FreeSurfer).
 //! - `mask` : masque blanc fermé d'un hémisphère à partir d'une segmentation (multi-)BOUNTI.
 //! - `white` : surface blanche (WM/GM) de genre 0 de chaque hémisphère, en GIfTI.
+//! - `run` : surfaces blanche et piale de chaque hémisphère, épaisseur et rapport de contrat.
 //! - `check` : contrôle du contrat d'une surface (topologie, auto-intersections) ou d'un couple WM/piale.
 
 mod white;
@@ -74,6 +75,27 @@ enum Command {
         #[command(flatten)]
         params: white::WhiteParams,
         /// Préfixe des fichiers écrits : <préfixe>_hemi-L_white.surf.gii
+        #[arg(long, short)]
+        out: PathBuf,
+    },
+    /// Surfaces blanche et piale de chaque hémisphère, épaisseur corticale et rapport de contrat
+    Run {
+        /// Segmentation NIfTI
+        seg: PathBuf,
+        /// Table de labels : bounti19 ou multibounti43
+        #[arg(long, default_value = "bounti19")]
+        labels: LabelTable,
+        /// Hémisphère (L ou R) ; les deux par défaut
+        #[arg(long)]
+        hemi: Option<Hemisphere>,
+        #[command(flatten)]
+        params: white::WhiteParams,
+        #[command(flatten)]
+        pial: white::PialArgs,
+        /// Distance minimale exigée entre surface blanche et piale (mm)
+        #[arg(long, default_value_t = 0.02)]
+        min_thickness: f64,
+        /// Préfixe des fichiers écrits : <préfixe>_hemi-L_{white,pial}.surf.gii, …
         #[arg(long, short)]
         out: PathBuf,
     },
@@ -251,6 +273,15 @@ fn run_check(
     }
 }
 
+/// Code de sortie d'un pipeline : échec si le contrat n'est pas respecté.
+fn contract(valid: bool) -> Result<(), String> {
+    if valid {
+        Ok(())
+    } else {
+        Err("contrat non respecté (voir les rapports JSON)".into())
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
@@ -281,7 +312,28 @@ fn main() -> ExitCode {
             out,
         } => {
             let hemis = hemi.map_or(Hemisphere::BOTH.to_vec(), |h| vec![h]);
-            white::run(&seg, &labels, &hemis, &params, &out)
+            white::run(&seg, &labels, &hemis, &params, None, 0.0, &out).and_then(contract)
+        }
+        Command::Run {
+            seg,
+            labels,
+            hemi,
+            params,
+            pial,
+            min_thickness,
+            out,
+        } => {
+            let hemis = hemi.map_or(Hemisphere::BOTH.to_vec(), |h| vec![h]);
+            white::run(
+                &seg,
+                &labels,
+                &hemis,
+                &params,
+                Some(&pial),
+                min_thickness,
+                &out,
+            )
+            .and_then(contract)
         }
     };
     match result {
