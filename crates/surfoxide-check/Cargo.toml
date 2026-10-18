@@ -7,3 +7,4 @@ edition.workspace = true
 surfoxide-core = { path = "../surfoxide-core" }
 robust = { workspace = true }
 serde = { workspace = true }
+rayon = { workspace = true }

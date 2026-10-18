@@ -1,12 +1,13 @@
 //! Surface blanche d'un hémisphère : segmentation → masque → distance signée → correction topologique →
-//! marching cubes → lissage de Taubin.
+//! marching cubes → lissage de Taubin (pas à pas, sans créer d'intersection) → remaillage isotrope →
+//! réparation locale des intersections restantes → contrôle du contrat.
 
 use std::path::Path;
 use std::time::Instant;
 
 use surfoxide_core::distance::signed_distance;
 use surfoxide_core::filter::{crop_to, gaussian_blur};
-use surfoxide_core::{topology_report, Hemisphere, TriMesh, Volume};
+use surfoxide_core::{Hemisphere, TriMesh, Volume};
 use surfoxide_io::gifti::SurfaceMeta;
 use surfoxide_mask::LabelTable;
 use surfoxide_topofix::{correct_topology, Strategy};
@@ -31,6 +32,10 @@ pub struct WhiteParams {
 /// Résultat de l'extraction : surface et bilan.
 pub struct WhiteSurface {
     pub mesh: TriMesh,
+    /// Sommets maintenus en place pendant le lissage (cumul sur les pas).
+    pub held: usize,
+    /// Réparation après remaillage.
+    pub repair: surfoxide_repair::RepairReport,
     pub added: usize,
     pub removed: usize,
     pub strategy: Strategy,
@@ -51,18 +56,22 @@ pub fn white_surface(
     let c =
         correct_topology(&phi, Strategy::Best, 0.05 * min_spacing).map_err(|e| e.to_string())?;
     let mut mesh = surfoxide_extract::marching_cubes(&c.levelset, 0.02);
-    surfoxide_extract::taubin(
-        &mut mesh,
-        params.taubin,
-        params.lambda,
-        -1.06 * params.lambda,
-    );
+    // Lissage pas à pas : un pas qui ferait se couper la surface est annulé localement.
+    let mut held = 0;
+    for _ in 0..params.taubin {
+        let mut trial = mesh.clone();
+        surfoxide_extract::taubin(&mut trial, 1, params.lambda, -1.06 * params.lambda);
+        held += surfoxide_repair::safe_update(&mut mesh, trial.vertices());
+    }
     if params.edge > 0.0 {
         mesh = surfoxide_remesh::remesh(&mesh, &surfoxide_remesh::RemeshParams::new(params.edge))
             .map_err(|_| "remaillage : surface non variété".to_string())?;
     }
+    let repair = surfoxide_repair::repair_intersections(&mut mesh, 30);
     Ok(WhiteSurface {
         mesh,
+        held,
+        repair,
         added: c.added,
         removed: c.removed,
         strategy: c.strategy,
@@ -81,18 +90,21 @@ pub fn run(
     for &hemi in hemis {
         let t = Instant::now();
         let w = white_surface(&labels, table, hemi, params)?;
-        let r = topology_report(&w.mesh);
+        let report = surfoxide_check::check_surface(&w.mesh);
         println!(
-            "hémisphère {hemi} : {:?} (+{} −{} voxels) ; V={} F={} χ={} genre={} volume={:.1} mm³ aire={:.1} mm² ; {:.1} s",
+            "hémisphère {hemi} : {:?} (+{} −{} voxels) ; lissage : {} sommets retenus ; réparation : {} → {} intersections ; V={} F={} genre={} volume={:.1} mm³ aire={:.1} mm² ; contrat {} ; {:.1} s",
             w.strategy,
             w.added,
             w.removed,
-            r.n_vertices,
-            r.n_faces,
-            r.euler_characteristic,
-            r.genus().map_or("—".into(), |g| g.to_string()),
-            w.mesh.signed_volume(),
-            w.mesh.area(),
+            w.held,
+            w.repair.initial,
+            w.repair.remaining,
+            report.n_vertices,
+            report.n_faces,
+            report.genus.map_or("—".into(), |g| g.to_string()),
+            report.signed_volume,
+            report.area,
+            if report.valid { "respecté" } else { "NON RESPECTÉ" },
             t.elapsed().as_secs_f64()
         );
         let mut meta = SurfaceMeta::hemisphere(hemi.is_left(), "GrayWhite");

@@ -5571,6 +5571,7 @@ dependencies = [
 name = "surfoxide-check"
 version = "0.1.0"
 dependencies = [
+ "rayon",
  "robust",
  "serde",
  "surfoxide-core",
@@ -5617,6 +5618,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "surfoxide-repair"
+version = "0.1.0"
+dependencies = [
+ "surfoxide-check",
+ "surfoxide-core",
+]
+
+[[package]]
 name = "surfoxide-topofix"
 version = "0.1.0"
 dependencies = [
@@ -5638,6 +5647,7 @@ dependencies = [
  "surfoxide-io",
  "surfoxide-mask",
  "surfoxide-remesh",
+ "surfoxide-repair",
  "surfoxide-topofix",
 ]
 

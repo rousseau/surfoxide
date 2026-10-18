@@ -10,6 +10,7 @@
 //! de `v`, dont l'autre extrémité est sur le bord de l'un des triangles, donc sur cette arête opposée ou
 //! sur une arête issue de `v` contenue dans l'autre triangle, ce qui ramène au cas précédent.
 
+use rayon::prelude::*;
 use serde::Serialize;
 use surfoxide_core::vec3::Vec3;
 use surfoxide_core::{topology_report, TriMesh};
@@ -55,42 +56,48 @@ fn faces_conflict(mesh: &TriMesh, f: u32, g: u32) -> bool {
     }
 }
 
-/// Paires de faces (f < g) qui se coupent.
+/// Paires de faces (f < g) qui se coupent, triées.
 pub fn self_intersections(mesh: &TriMesh) -> Vec<(u32, u32)> {
     let bvh = Bvh::new(mesh);
-    let mut out = Vec::new();
-    for f in 0..mesh.n_faces() as u32 {
-        let bbox = *bvh.face_box(f);
-        bvh.query_box(&bbox, |g| {
-            if g > f && faces_conflict(mesh, f, g) {
-                out.push((f, g));
-            }
-        });
-    }
-    out
+    (0..mesh.n_faces() as u32)
+        .into_par_iter()
+        .flat_map_iter(|f| {
+            let mut out = Vec::new();
+            let bbox = *bvh.face_box(f);
+            bvh.query_box(&bbox, |g| {
+                if g > f && faces_conflict(mesh, f, g) {
+                    out.push((f, g));
+                }
+            });
+            out
+        })
+        .collect()
 }
 
 /// Paires (face de `a`, face de `b`) qui se coupent ; les deux maillages n'ont aucun sommet commun.
 pub fn cross_intersections(a: &TriMesh, b: &TriMesh) -> Vec<(u32, u32)> {
     let bvh = Bvh::new(b);
-    let mut out = Vec::new();
-    for f in 0..a.n_faces() as u32 {
-        let t = tri(a, f);
-        let bbox = bvh::Aabb::of_points(&t);
-        bvh.query_box(&bbox, |g| {
-            if triangles_intersect(t, tri(b, g)) {
-                out.push((f, g));
-            }
-        });
-    }
-    out
+    (0..a.n_faces() as u32)
+        .into_par_iter()
+        .flat_map_iter(|f| {
+            let mut out = Vec::new();
+            let t = tri(a, f);
+            let bbox = bvh::Aabb::of_points(&t);
+            bvh.query_box(&bbox, |g| {
+                if triangles_intersect(t, tri(b, g)) {
+                    out.push((f, g));
+                }
+            });
+            out
+        })
+        .collect()
 }
 
 /// Distance de chaque sommet de `from` à la surface `to`.
 pub fn vertex_distances(from: &TriMesh, to: &TriMesh) -> Vec<f64> {
     let bvh = Bvh::new(to);
     from.vertices()
-        .iter()
+        .par_iter()
         .map(|&p| {
             bvh.nearest(p, |g| {
                 let [a, b, c] = tri(to, g);
