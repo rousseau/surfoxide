@@ -5609,6 +5609,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "surfoxide-remesh"
+version = "0.1.0"
+dependencies = [
+ "surfoxide-check",
+ "surfoxide-core",
+]
+
+[[package]]
 name = "surfoxide-topofix"
 version = "0.1.0"
 dependencies = [
@@ -5629,6 +5637,7 @@ dependencies = [
  "surfoxide-extract",
  "surfoxide-io",
  "surfoxide-mask",
+ "surfoxide-remesh",
  "surfoxide-topofix",
 ]
 

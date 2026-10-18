@@ -23,6 +23,9 @@ pub struct WhiteParams {
     /// Pas λ de Taubin (le pas μ vaut −1,06 λ)
     #[arg(long, default_value_t = 0.5)]
     pub lambda: f64,
+    /// Longueur d'arête visée par le remaillage isotrope (mm) ; 0 : pas de remaillage
+    #[arg(long, default_value_t = 0.5)]
+    pub edge: f64,
 }
 
 /// Résultat de l'extraction : surface et bilan.
@@ -54,6 +57,10 @@ pub fn white_surface(
         params.lambda,
         -1.06 * params.lambda,
     );
+    if params.edge > 0.0 {
+        mesh = surfoxide_remesh::remesh(&mesh, &surfoxide_remesh::RemeshParams::new(params.edge))
+            .map_err(|_| "remaillage : surface non variété".to_string())?;
+    }
     Ok(WhiteSurface {
         mesh,
         added: c.added,
