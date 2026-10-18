@@ -36,7 +36,11 @@ P0, des surfaces utilisables par gyroxide :
 8. Réparation locale des faces fautives — fait (déplacement de sommets uniquement).
 9. Piale sans apprentissage : gonflement de la WM vers la frontière cortex/LCR (flot déterministe) — fait :
    lignes de courant du champ de Laplace, sillons enfouis ouverts par leur nappe médiane.
-Reste : validation sur la cohorte et comparaison à fetpype (plan, jalon J10).
+Validation (J10, octobre 2026, `scripts/validate.py`) : 46 hémisphères de 20 à 38 SA, blanche conforme
+46/46 (fetpype 24/38), blanche + piale 44/46 (2 sous le seuil d'épaisseur minimale) ; rapport :
+https://claude.ai/artifact/3HimTmuqiVZYXDtQt9JKtF
+Reste en P0 : contrainte de distance minimale dans la progression de la piale ; sommets de piale
+retenus dans les sillons étroits (5 à 10 % après 30 SA) ; chargement effectif dans gyroxide.
 
 P1 : intégrateur ODE dans Burn, réseaux de déformation à la CoSeg (faiblement supervisés par les
 segmentations de medoxide), opérateurs différentiels, métriques (épaisseur, profondeur sulcale,
