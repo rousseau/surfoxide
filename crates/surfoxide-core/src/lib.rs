@@ -5,6 +5,8 @@
 //! - [`VertexField`] : champ scalaire par sommet.
 //! - [`adjacency`] : arêtes, voisinages, normales, aires.
 //! - [`components`] : composantes connexes et cavités d'un masque 3D.
+//! - [`distance`] : transformée de distance euclidienne, distance signée.
+//! - [`filter`] : flou gaussien, recadrage de volume.
 //! - [`Hemisphere`] : gauche ou droit.
 //! - [`topology`] : contrôles de topologie (variété, bords, orientation, composantes, genre),
 //!   première brique du contrat de validation demandé par gyroxide.
@@ -13,7 +15,9 @@
 
 pub mod adjacency;
 pub mod components;
+pub mod distance;
 pub mod field;
+pub mod filter;
 pub mod hemisphere;
 pub mod mesh;
 pub mod shapes;

@@ -1,0 +1,11 @@
+[package]
+name = "surfoxide-topofix"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+surfoxide-core = { path = "../surfoxide-core" }
+
+[dev-dependencies]
+surfoxide-io = { path = "../surfoxide-io" }
+surfoxide-mask = { path = "../surfoxide-mask" }

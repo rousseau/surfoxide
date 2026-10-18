@@ -5586,6 +5586,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "surfoxide-topofix"
+version = "0.1.0"
+dependencies = [
+ "surfoxide-core",
+ "surfoxide-io",
+ "surfoxide-mask",
+]
+
+[[package]]
 name = "surfx"
 version = "0.1.0"
 dependencies = [
