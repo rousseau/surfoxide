@@ -66,7 +66,7 @@ Baseline de référence pour P0 : fetpype `surface_processing` (github.com/fetpy
   plafonnée par le pilote).
 - Machine WSL (RTX 3080, alias ssh `sshwsl`) : secondaire, pas toujours allumée ; `scripts/setup-wsl.sh`.
 - La compilation `--features cuda` télécharge un paquet LLVM (~45 Mo) dans `~/.cache/tracel/`.
-- Données réelles (hors Git) : bucket `garage:crl2025`, dérivées dans
+- Données réelles (hors Git) : bucket `garage:fetal-crl2025`, dérivées dans
   `derivatives/fetal-folding-geometry/<sub>/<ses>/anat/` (BOUNTI-19, multi-BOUNTI-43, T2w rééchantillonnée
   à 0,5 mm). `bash scripts/fetch-data.sh` les rapatrie dans `$SURFOXIDE_DATA` (défaut
   `~/.cache/surfoxide/data`) pour les tests ignorés, la validation et les figures. Âges gestationnels :
