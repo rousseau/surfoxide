@@ -36,13 +36,14 @@ P0, des surfaces utilisables par gyroxide :
 8. Réparation locale des faces fautives — fait (déplacement de sommets uniquement).
 9. Piale sans apprentissage : gonflement de la WM vers la frontière cortex/LCR (flot déterministe) — fait :
    lignes de courant du champ de Laplace, sillons enfouis ouverts par leur nappe médiane.
-Validation (J10, octobre 2026, `scripts/validate.py`) : 46 hémisphères de 20 à 38 SA, blanche conforme
-46/46 (fetpype 24/38), blanche + piale 44/46 (2 sous le seuil d'épaisseur minimale) ; rapport :
-https://claude.ai/artifact/3HimTmuqiVZYXDtQt9JKtF
-Depuis : distance minimale imposée pendant la progression de la piale ; masque du cortex par sommet
-(`_cortex.shape.gii`, 0 sur la face médiale), l'épaisseur moyenne ne porte que sur le cortex.
-Reste en P0 : sommets de piale retenus dans les sillons étroits (5 à 10 % après 30 SA) ; crêtes minces
-de substance blanche (secours sur 2 sessions) ; chargement effectif dans gyroxide.
+Validation sur toute la cohorte (octobre 2026, `scripts/validate.py --all`, 193 sessions de 20 à 38 SA) :
+contrat complet (blanche + piale + distance minimale) 383/386 hémisphères BOUNTI-19 (99,2 %) et 378/384
+multi-BOUNTI-43 (98,4 %) ; HD95 médian 0,17 et 0,19 mm ; épaisseur corticale médiane 1,66 et 1,47 mm.
+Comparaison à fetpype (19 sessions) : blanche conforme 46/46 contre 24/38, HD95 0,18 contre 0,40 mm.
+Présentation : https://claude.ai/artifact/DVcshJu5TQaxDFMLKSLWdZ
+Reste en P0 : 7 hémisphères dont la piale ne démarre pas (plis résiduels de la blanche après 28 SA),
+2 sous le seuil de distance ; sommets de piale retenus dans les sillons étroits (5 à 10 % après 30 SA) ;
+chargement effectif dans gyroxide.
 
 P1 : intégrateur ODE dans Burn, réseaux de déformation à la CoSeg (faiblement supervisés par les
 segmentations de medoxide), opérateurs différentiels, métriques (épaisseur, profondeur sulcale,
