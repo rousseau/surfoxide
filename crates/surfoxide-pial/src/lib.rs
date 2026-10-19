@@ -150,6 +150,8 @@ pub struct PialParams {
     /// Distance minimale (mm) qu'une face de la piale doit garder avec tout sommet de la surface blanche
     /// pendant la progression.
     pub min_distance: f64,
+    /// Passes de rattrapage des sommets retenus, après la progression.
+    pub catchup_passes: usize,
 }
 
 impl Default for PialParams {
@@ -161,6 +163,7 @@ impl Default for PialParams {
             min_offset: 0.1,
             flow_steps: 10,
             min_distance: 0.03,
+            catchup_passes: 6,
         }
     }
 }
@@ -311,11 +314,15 @@ fn path_length(path: &[Vec3]) -> f64 {
 /// Résultat de la construction de la piale.
 pub struct Pial {
     pub mesh: TriMesh,
-    /// Abscisse curviligne atteinte par chaque sommet (mm) : épaisseur corticale le long de la ligne de
-    /// courant.
+    /// Épaisseur corticale (mm) : longueur de la ligne de courant de Laplace de chaque sommet blanc (Jones
+    /// et al. 2000), que la piale l'ait parcourue en entier ou non.
     pub thickness: VertexField,
     /// Sommets qui n'ont pas atteint le bout de leur ligne de courant.
     pub held: usize,
+    /// Longueur moyenne (mm) de ligne de courant non parcourue par ces sommets.
+    pub mean_missing: f64,
+    /// Longueur de ligne de courant non parcourue, par sommet (mm).
+    pub missing: VertexField,
 }
 
 /// Erreur de construction de la piale.
@@ -419,12 +426,28 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
     // long de la normale moyenne traverserait une face voisine, aussi petit soit-il.
     let vf = surfoxide_core::adjacency::vertex_faces(white);
     let fnorm = surfoxide_core::adjacency::face_normals(white);
-    let normals: Vec<Vec3> = surfoxide_core::adjacency::vertex_normals(white)
+    // Normales lissées sur le voisinage (champ de directions régulier : des sommets voisins s'écartent
+    // ensemble), puis ramenées dans le cône des faces incidentes, nettement (cosinus 0,3) si possible.
+    let nb = surfoxide_core::adjacency::vertex_neighbors(white);
+    let mut smooth = surfoxide_core::adjacency::vertex_normals(white);
+    for _ in 0..3 {
+        smooth = (0..smooth.len())
+            .map(|i| {
+                let s = nb[i]
+                    .iter()
+                    .fold(smooth[i], |acc, &j| vec3::add(acc, smooth[j as usize]));
+                vec3::normalize(s)
+            })
+            .collect();
+    }
+    let normals: Vec<Vec3> = smooth
         .into_iter()
         .enumerate()
         .map(|(v, n)| {
             let fs: Vec<Vec3> = vf[v].iter().map(|&f| fnorm[f as usize]).collect();
-            cone_direction(n, &fs, 0.05).unwrap_or(n)
+            cone_direction(n, &fs, 0.3)
+                .or_else(|| cone_direction(n, &fs, 0.05))
+                .unwrap_or(n)
         })
         .collect();
     let paths: Vec<Vec<Vec3>> = white
@@ -435,6 +458,17 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
         .collect();
     let lengths: Vec<f64> = paths.iter().map(|p| path_length(p)).collect();
     let at = |i: usize, s: f64| point_at(&paths[i], s, normals[i]);
+    // Décalage d'un polyèdre : pour que chaque face incidente s'écarte d'au moins ε, le sommet s'écarte de
+    // ε / min(d · n_f) le long de sa direction d (au fond d'une vallée étroite, d · n_f est petit).
+    let stretch: Vec<f64> = (0..white.n_vertices())
+        .map(|v| {
+            let c = vf[v]
+                .iter()
+                .map(|&f| vec3::dot(normals[v], fnorm[f as usize]))
+                .fold(f64::INFINITY, f64::min);
+            1.0 / c.max(0.2)
+        })
+        .collect();
 
     // Décalage initial le long de la normale, réduit localement tant qu'il crée des intersections (entre
     // deux berges très proches, ou là où la ligne de courant part en biais).
@@ -448,34 +482,37 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
     const HALVINGS: usize = 12;
     let debug = std::env::var_os("SURFOXIDE_DEBUG").is_some();
     for (i, p) in pial.vertices_mut().iter_mut().enumerate() {
-        *p = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i]));
+        *p = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i] * stretch[i]));
     }
     let mut bad = conflicting_vertices(&pial, Some(white));
     let mut attempt = 0;
     while !bad.is_empty() && attempt < HALVINGS {
         let mut region: std::collections::HashSet<u32> = bad.clone();
-        let rings = if attempt < HALVINGS { 1 } else { attempt - HALVINGS + 1 };
-        for _ in 0..rings {
-            let more: Vec<u32> = region.iter().flat_map(|&v| ring[v as usize].iter().copied()).collect();
-            region.extend(more);
+        region.extend(bad.iter().flat_map(|&v| ring[v as usize].iter().copied()));
+        for &v in &region {
+            offset[v as usize] /= 2.0;
         }
-        if attempt < HALVINGS {
-            for &v in &region {
-                offset[v as usize] /= 2.0;
-                pial.vertices_mut()[v as usize] = vec3::add(
-                    white.vertices()[v as usize],
-                    vec3::scale(normals[v as usize], offset[v as usize]),
-                );
-            }
-        } else {
-            for _ in 0..20 {
-                let pos = pial.vertices().to_vec();
-                for &v in &region {
-                    let n = &ring[v as usize];
-                    let mean = n.iter().fold([0.0; 3], |acc, &w| vec3::add(acc, pos[w as usize]));
-                    pial.vertices_mut()[v as usize] = vec3::scale(mean, 1.0 / n.len() as f64);
+        // Champ de décalages régulier : pas plus de 1,3 fois le décalage du voisin le plus bas. Un sommet
+        // presque collé à la blanche à côté de voisins restés au large inclinerait les faces qui les relient,
+        // qui plongeraient alors sous les faces blanches voisines.
+        for _ in 0..30 {
+            let mut changed = false;
+            for i in 0..offset.len() {
+                let low = ring[i]
+                    .iter()
+                    .map(|&j| offset[j as usize])
+                    .fold(f64::INFINITY, f64::min);
+                if offset[i] > 1.3 * low {
+                    offset[i] = 1.3 * low;
+                    changed = true;
                 }
             }
+            if !changed {
+                break;
+            }
+        }
+        for (i, p) in pial.vertices_mut().iter_mut().enumerate() {
+            *p = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i] * stretch[i]));
         }
         bad = conflicting_vertices(&pial, Some(white));
         attempt += 1;
@@ -484,6 +521,31 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
         }
     }
     if !bad.is_empty() && debug {
+        // Quelles faces blanches la piale décalée traverse-t-elle : celles du voisinage (sommets communs avec
+        // la face de piale) ou des faces lointaines ?
+        let pairs = surfoxide_check::cross_intersections(&pial, white);
+        let (mut local, mut far) = (0, 0);
+        for &(fp, fw) in &pairs {
+            let tp = pial.faces()[fp as usize];
+            let tw = white.faces()[fw as usize];
+            if tw.iter().any(|x| tp.contains(x)) {
+                local += 1;
+            } else {
+                far += 1;
+                if far <= 3 {
+                    let d = tp
+                        .iter()
+                        .map(|&a| {
+                            tw.iter()
+                                .map(|&b| vec3::dist(white.vertices()[a as usize], white.vertices()[b as usize]))
+                                .fold(f64::INFINITY, f64::min)
+                        })
+                        .fold(f64::INFINITY, f64::min);
+                    eprintln!("  traversée lointaine : face piale {tp:?}, face blanche {tw:?}, distance blanche minimale entre sommets {d:.3} mm");
+                }
+            }
+        }
+        eprintln!("  intersections piale/blanche : {local} avec une face voisine, {far} avec une face lointaine");
         let selfs = surfoxide_repair::intersecting_vertices(&pial);
         let nb = surfoxide_core::adjacency::vertex_neighbors(white);
         for &v in bad.iter().take(12) {
@@ -497,11 +559,13 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
                 })
                 .fold(f64::INFINITY, f64::min);
             eprintln!(
-                "  bloqué {v} : auto-intersection de la piale {}, valence {}, cône {cone}, angle min {min_angle:.1}°, décalage {:.1e}, position {:?}",
+                "  bloqué {v} : auto-intersection de la piale {}, valence {}, cône {cone}, angle min {min_angle:.1}°, décalage {:.1e}, étirement {:.2}, |P−W| {:.2e}, direction {:?}",
                 selfs.contains(&v),
                 nb[v as usize].len(),
                 offset[v as usize],
-                white.vertices()[v as usize]
+                stretch[v as usize],
+                vec3::dist(pial.vertices()[v as usize], white.vertices()[v as usize]),
+                normals[v as usize]
             );
         }
     }
@@ -537,13 +601,51 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
             }
         }
     }
+    // Rattrapage dans les sillons étroits : un sommet retenu tente la moitié du chemin qui lui reste, puis,
+    // s'il est encore bloqué, une fraction deux fois plus petite ; ses voisins arrivés entre-temps ont
+    // souvent libéré la place.
+    let full: Vec<f64> = (0..white.n_vertices()).map(|i| lengths[i].max(offset[i])).collect();
+    let mut frac = vec![0.5; white.n_vertices()];
+    for _ in 0..params.catchup_passes {
+        let behind: Vec<usize> = (0..white.n_vertices())
+            .filter(|&i| reached[i] + 1e-6 < full[i] && frac[i] > 1.0 / 64.0)
+            .collect();
+        if behind.is_empty() {
+            break;
+        }
+        let mut target = pial.vertices().to_vec();
+        let mut tried = vec![0.0; white.n_vertices()];
+        for &i in &behind {
+            tried[i] = reached[i] + frac[i] * (full[i] - reached[i]);
+            target[i] = at(i, tried[i]);
+        }
+        safe_update_with(&mut pial, &target, |m| {
+            let mut bad = conflicting_vertices(m, Some(white));
+            bad.extend(faces_near(m, white, params.min_distance));
+            bad
+        });
+        for &i in &behind {
+            if pial.vertices()[i] == target[i] {
+                reached[i] = tried[i];
+            } else {
+                frac[i] /= 2.0;
+            }
+        }
+    }
+    let missing: Vec<f64> = (0..white.n_vertices())
+        .map(|i| (full[i] - reached[i]).max(0.0))
+        .collect();
+    let behind: Vec<f64> = missing.iter().copied().filter(|&m| m > 1e-6).collect();
+    let mean_missing = behind.iter().sum::<f64>() / behind.len().max(1) as f64;
     let held = (0..white.n_vertices())
         .filter(|&i| reached[i] + 1e-9 < lengths[i].max(offset[i]))
         .count();
     Ok(Pial {
         mesh: pial,
-        thickness: VertexField::new("thickness", reached),
+        thickness: VertexField::new("thickness", full),
         held,
+        mean_missing,
+        missing: VertexField::new("missing", missing),
     })
 }
 

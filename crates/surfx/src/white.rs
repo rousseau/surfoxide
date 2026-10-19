@@ -118,9 +118,11 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     // Amas de micro-triangles, puis plis aigus : gênent le décalage de la piale et trahissent un artefact
     // local.
     clean_short_edges(&mut mesh, 0.1 * params.edge.max(0.5));
-    unfold(&mut mesh);
-    debug_topology("micro-arêtes et plis", &mesh);
     surfoxide_repair::relax_sharp_vertices(&mut mesh, 0.1, 20);
+    // En dernier : la détente des sommets anguleux garde certains sommets en place et peut replier la
+    // surface autour d'eux.
+    unfold(&mut mesh);
+    debug_topology("micro-arêtes, sommets anguleux et plis", &mesh);
     Ok(WhiteSurface {
         mesh,
         object: c.object,
@@ -153,8 +155,15 @@ fn debug_topology(step: &str, mesh: &TriMesh) {
 /// Déplie les plis (faces voisines de normales opposées) ; ne garde le résultat que s'il reste (après
 /// réparation) sans intersection.
 fn unfold(mesh: &mut TriMesh) {
-    if let Ok((mut m, _)) = surfoxide_remesh::unfold(mesh, -0.5, 5) {
-        if surfoxide_repair::repair_intersections(&mut m, 30).remaining == 0 {
+    if let Ok((mut m, remaining)) = surfoxide_remesh::unfold(mesh, -0.5, 10) {
+        let repair = surfoxide_repair::repair_intersections(&mut m, 30);
+        if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
+            eprintln!(
+                "  dépliage : {remaining} plis restants ; réparation {} → {} intersections",
+                repair.initial, repair.remaining
+            );
+        }
+        if repair.remaining == 0 {
             *mesh = m;
         }
     }
@@ -374,8 +383,9 @@ pub fn run(
                 .sum::<f64>()
                 / n_cortical.max(1) as f64;
             println!(
-                "hémisphère {hemi}, piale : nappe des sillons enfouis {n_skeleton} voxels ; Laplace {iters} itérations ; {} sommets retenus ; épaisseur moyenne (cortex, {:.0} % des sommets) {mean_th:.2} mm ; distance minimale {:.3} mm ; intersections WM/piale {} ; contrat {} ; {:.1} s",
+                "hémisphère {hemi}, piale : nappe des sillons enfouis {n_skeleton} voxels ; Laplace {iters} itérations ; {} sommets retenus (manque moyen {:.2} mm) ; épaisseur moyenne (cortex, {:.0} % des sommets) {mean_th:.2} mm ; distance minimale {:.3} mm ; intersections WM/piale {} ; contrat {} ; {:.1} s",
                 pial.held,
+                pial.mean_missing,
                 100.0 * n_cortical as f64 / cortical.len().max(1) as f64,
                 pair.min_distance,
                 pair.intersections,
@@ -396,6 +406,12 @@ pub fn run(
             report["pial"] = serde_json::to_value(pial_report).map_err(|e| e.to_string())?;
             report["pair"] = serde_json::to_value(pair).map_err(|e| e.to_string())?;
             report["pial_held_vertices"] = pial.held.into();
+            report["pial_mean_missing"] = pial.mean_missing.into();
+            if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
+                let path = format!("{prefix}_missing.shape.gii");
+                surfoxide_io::gifti::write_fields(&path, std::slice::from_ref(&pial.missing), &SurfaceMeta::default())
+                    .map_err(|e| format!("{path}: {e}"))?;
+            }
             report["mean_thickness"] = mean_th.into();
         }
         report["valid"] = valid.into();
