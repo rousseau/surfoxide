@@ -288,14 +288,36 @@ pub fn run(
         let mut report =
             serde_json::json!({ "white": white_report, "remesh_dropped": w.remesh_dropped });
         let mut valid = white_report.valid;
+        // Sommets corticaux de la surface blanche (0 sur la face médiale : ventricules, noyaux gris).
+        let cortical = surfoxide_mask::cortical_vertices(&w.mesh, &grids.cortex, 1.0, 3);
+        let n_cortical = cortical.iter().filter(|&&c| c).count();
+        let path = format!("{prefix}_cortex.shape.gii");
+        surfoxide_io::gifti::write_fields(
+            &path,
+            &[surfoxide_core::VertexField::new(
+                "cortex",
+                cortical.iter().map(|&c| c as u8 as f64).collect(),
+            )],
+            &meta(hemi, "GrayWhite", &labels, seg),
+        )
+        .map_err(|e| format!("{path}: {e}"))?;
+        report["cortex_fraction"] = (n_cortical as f64 / cortical.len().max(1) as f64).into();
         if let Some(((pial, n_skeleton, iters), secs)) = pial {
             let pial_report = surfoxide_check::check_surface(&pial.mesh);
             let pair = surfoxide_check::check_pair(&w.mesh, &pial.mesh, min_thickness);
+            // Épaisseur moyenne sur les seuls sommets corticaux.
             let th = &pial.thickness.values;
-            let mean_th = th.iter().sum::<f64>() / th.len() as f64;
+            let mean_th = th
+                .iter()
+                .zip(&cortical)
+                .filter(|(_, &c)| c)
+                .map(|(t, _)| t)
+                .sum::<f64>()
+                / n_cortical.max(1) as f64;
             println!(
-                "hémisphère {hemi}, piale : nappe des sillons enfouis {n_skeleton} voxels ; Laplace {iters} itérations ; {} sommets retenus ; épaisseur moyenne {mean_th:.2} mm ; distance minimale {:.3} mm ; intersections WM/piale {} ; contrat {} ; {:.1} s",
+                "hémisphère {hemi}, piale : nappe des sillons enfouis {n_skeleton} voxels ; Laplace {iters} itérations ; {} sommets retenus ; épaisseur moyenne (cortex, {:.0} % des sommets) {mean_th:.2} mm ; distance minimale {:.3} mm ; intersections WM/piale {} ; contrat {} ; {:.1} s",
                 pial.held,
+                100.0 * n_cortical as f64 / cortical.len().max(1) as f64,
                 pair.min_distance,
                 pair.intersections,
                 if pial_report.valid && pair.valid { "respecté" } else { "NON RESPECTÉ" },

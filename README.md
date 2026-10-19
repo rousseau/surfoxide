@@ -16,7 +16,7 @@ surfoxide fait le lien, par les données, entre deux projets :
 |---|---|
 | `surfx device` | Vérifie qu'un backend Burn calcule sur la machine (CPU, CUDA ou wgpu) |
 | `surfx selftest` | Construit une icosphère et un tore et affiche leur bilan topologique |
-| `surfx run` | Surfaces blanche et piale de chaque hémisphère, épaisseur corticale (`.shape.gii`) et rapport de contrat JSON |
+| `surfx run` | Surfaces blanche et piale de chaque hémisphère, épaisseur corticale et masque du cortex (`.shape.gii`), rapport de contrat JSON |
 | `surfx white` | Surface blanche de genre 0 de chaque hémisphère (GIfTI) : masque, correction topologique, marching cubes, Taubin, remaillage isotrope, réparation ; rapport de contrat JSON |
 | `surfx eval` | Distance d'une surface à la frontière de la segmentation (Hausdorff 95 %), qualité du maillage, contrat |
 | `surfx check` | Contrôle du contrat : topologie, orientation, auto-intersections ; imbrication et épaisseur WM/piale ; rapport JSON |

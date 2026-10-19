@@ -39,8 +39,10 @@ P0, des surfaces utilisables par gyroxide :
 Validation (J10, octobre 2026, `scripts/validate.py`) : 46 hémisphères de 20 à 38 SA, blanche conforme
 46/46 (fetpype 24/38), blanche + piale 44/46 (2 sous le seuil d'épaisseur minimale) ; rapport :
 https://claude.ai/artifact/3HimTmuqiVZYXDtQt9JKtF
-Reste en P0 : contrainte de distance minimale dans la progression de la piale ; sommets de piale
-retenus dans les sillons étroits (5 à 10 % après 30 SA) ; chargement effectif dans gyroxide.
+Depuis : distance minimale imposée pendant la progression de la piale ; masque du cortex par sommet
+(`_cortex.shape.gii`, 0 sur la face médiale), l'épaisseur moyenne ne porte que sur le cortex.
+Reste en P0 : sommets de piale retenus dans les sillons étroits (5 à 10 % après 30 SA) ; crêtes minces
+de substance blanche (secours sur 2 sessions) ; chargement effectif dans gyroxide.
 
 P1 : intégrateur ODE dans Burn, réseaux de déformation à la CoSeg (faiblement supervisés par les
 segmentations de medoxide), opérateurs différentiels, métriques (épaisseur, profondeur sulcale,

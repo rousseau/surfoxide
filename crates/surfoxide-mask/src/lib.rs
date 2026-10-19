@@ -227,6 +227,42 @@ pub fn hemisphere_masks(
     (white, cortex)
 }
 
+/// Sommets corticaux d'une surface : vrai si le voxel de cortex le plus proche est à moins de `max_dist`
+/// mm. Les autres forment la face médiale non corticale (ventricules, noyaux gris, plan médian), où
+/// l'épaisseur n'a pas de sens. La carte est nettoyée par `smooth` passes de vote majoritaire sur le
+/// premier anneau.
+pub fn cortical_vertices(
+    mesh: &surfoxide_core::TriMesh,
+    cortex: &Volume<bool>,
+    max_dist: f64,
+    smooth: usize,
+) -> Vec<bool> {
+    let d2 = surfoxide_core::distance::edt_squared(cortex);
+    let dims = cortex.dims();
+    let mut label: Vec<bool> = mesh
+        .vertices()
+        .iter()
+        .map(|&p| {
+            let Some(q) = cortex.world_to_voxel(p) else {
+                return false;
+            };
+            let idx: [usize; 3] =
+                std::array::from_fn(|a| (q[a].round().max(0.0) as usize).min(dims[a] - 1));
+            d2.get(idx[0], idx[1], idx[2]) <= max_dist * max_dist
+        })
+        .collect();
+    let nb = surfoxide_core::adjacency::vertex_neighbors(mesh);
+    for _ in 0..smooth {
+        label = (0..label.len())
+            .map(|i| {
+                let yes = nb[i].iter().filter(|&&j| label[j as usize]).count() + label[i] as usize;
+                2 * yes > nb[i].len() + 1
+            })
+            .collect();
+    }
+    label
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +310,39 @@ mod tests {
         assert!(m.get(1, 1, 1));
         assert!(!m.get(7, 2, 2), "la WM droite n'en fait pas partie");
         assert!(!m.get(8, 2, 0), "le cervelet n'en fait pas partie");
+    }
+
+    #[test]
+    fn sommets_corticaux_d_une_demi_coquille() {
+        use surfoxide_core::shapes::icosphere;
+        // Sphère de rayon 5 ; cortex seulement au-dessus du plan z = 0, entre 5 et 7 mm.
+        let n = 41;
+        let c = (n as f64 - 1.0) / 2.0 * 0.5;
+        let mut aff = IDENTITY;
+        for (a, row) in aff.iter_mut().take(3).enumerate() {
+            row[a] = 0.5;
+            row[3] = -c;
+        }
+        let mut cortex = Volume::filled([n, n, n], false, aff);
+        for k in 0..n {
+            for j in 0..n {
+                for i in 0..n {
+                    let p = cortex.voxel_to_world([i as f64, j as f64, k as f64]);
+                    let r = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+                    cortex.set(i, j, k, p[2] > 0.0 && (5.0..7.0).contains(&r));
+                }
+            }
+        }
+        let s = icosphere(3, 5.0);
+        let lab = cortical_vertices(&s, &cortex, 1.0, 2);
+        for (p, &l) in s.vertices().iter().zip(&lab) {
+            if p[2] > 1.5 {
+                assert!(l, "sommet {p:?} devrait être cortical");
+            }
+            if p[2] < -1.5 {
+                assert!(!l, "sommet {p:?} ne devrait pas être cortical");
+            }
+        }
     }
 
     #[test]
