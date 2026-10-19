@@ -14,7 +14,7 @@
 //!    la surface blanche, avec la même connectivité.
 
 use surfoxide_check::bvh::Bvh;
-use surfoxide_check::distance::distance2_triangle;
+use surfoxide_check::distance::{closest_point_triangle, distance2_triangle};
 use surfoxide_core::distance::feature_transform;
 use surfoxide_core::vec3::{self, Vec3};
 use surfoxide_core::volume::invert_affine;
@@ -395,24 +395,29 @@ pub fn enforce_min_distance(white: &mut TriMesh, pial: &TriMesh, eps: f64, round
             .iter()
             .enumerate()
             .filter_map(|(i, &p)| {
-                let (_, d2) = bvh.nearest(p, |g| {
+                let (g, d2) = bvh.nearest(p, |g| {
                     let t = f[g as usize];
                     distance2_triangle(p, v[t[0] as usize], v[t[1] as usize], v[t[2] as usize])
                 })?;
-                (d2 < eps * eps).then(|| (i as u32, eps - d2.sqrt()))
+                if d2 >= eps * eps {
+                    return None;
+                }
+                let t = f[g as usize];
+                let q =
+                    closest_point_triangle(p, v[t[0] as usize], v[t[1] as usize], v[t[2] as usize]);
+                Some((i as u32, q, eps - d2.sqrt()))
             })
             .collect::<Vec<_>>();
         if close.is_empty() {
             return 0;
         }
-        // Recul de l'écart manquant, plus une petite marge, sommet par sommet.
-        let normals = surfoxide_core::adjacency::vertex_normals(white);
+        // Recul de l'écart manquant, plus une petite marge, à l'opposé du point le plus proche de la piale :
+        // la normale n'éloigne pas d'une face de la piale presque parallèle à elle.
         let mut new = white.vertices().to_vec();
-        for &(i, missing) in &close {
-            new[i as usize] = vec3::sub(
-                new[i as usize],
-                vec3::scale(normals[i as usize], missing + 0.2 * eps),
-            );
+        for &(i, q, missing) in &close {
+            let p = new[i as usize];
+            let away = vec3::normalize(vec3::sub(p, q));
+            new[i as usize] = vec3::add(p, vec3::scale(away, missing + 0.2 * eps));
         }
         safe_update_with(white, &new, |m| conflicting_vertices(m, Some(pial)));
     }
@@ -521,6 +526,28 @@ pub fn pial_from_white(
             eprintln!(
                 "décalage initial, essai {attempt} : {} sommets en conflit",
                 bad.len()
+            );
+        }
+    }
+    if !bad.is_empty() && debug {
+        let selfs = surfoxide_repair::intersecting_vertices(&pial);
+        let nb = surfoxide_core::adjacency::vertex_neighbors(white);
+        for &v in bad.iter().take(12) {
+            let fs: Vec<Vec3> = vf[v as usize].iter().map(|&f| fnorm[f as usize]).collect();
+            let cone = cone_direction(normals[v as usize], &fs, 0.05).is_some();
+            let min_angle = vf[v as usize]
+                .iter()
+                .map(|&f| {
+                    let t = white.faces()[f as usize].map(|i| white.vertices()[i as usize]);
+                    surfoxide_check::quality::min_angle(t[0], t[1], t[2])
+                })
+                .fold(f64::INFINITY, f64::min);
+            eprintln!(
+                "  bloqué {v} : auto-intersection de la piale {}, valence {}, cône {cone}, angle min {min_angle:.1}°, décalage {:.1e}, position {:?}",
+                selfs.contains(&v),
+                nb[v as usize].len(),
+                offset[v as usize],
+                white.vertices()[v as usize]
             );
         }
     }

@@ -100,7 +100,9 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     let min_spacing = mask.spacing().into_iter().fold(f64::INFINITY, f64::min);
     let c =
         correct_topology(&phi, Strategy::Best, 0.05 * min_spacing).map_err(|e| e.to_string())?;
-    let mut mesh = surfoxide_extract::marching_cubes(&c.levelset, 0.02);
+    // Points à au moins 0,2 voxel des centres : une lame ou un sillon d'un voxel garde une épaisseur
+    // d'au moins 0,2 voxel, où la piale peut passer.
+    let mut mesh = surfoxide_extract::marching_cubes(&c.levelset, 0.2);
     debug_topology("marching cubes", &mesh);
     // Lissage pas à pas : un pas qui ferait se couper la surface est annulé localement.
     let mut held = 0;
@@ -129,7 +131,8 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     // Amas de micro-triangles, puis plis aigus : gênent le décalage de la piale et trahissent un artefact
     // local.
     clean_short_edges(&mut mesh, 0.1 * params.edge.max(0.5));
-    debug_topology("micro-arêtes", &mesh);
+    unfold(&mut mesh);
+    debug_topology("micro-arêtes et plis", &mesh);
     surfoxide_repair::relax_sharp_vertices(&mut mesh, 0.1, 20);
     Ok(WhiteSurface {
         mesh,
@@ -157,6 +160,16 @@ fn debug_topology(step: &str, mesh: &TriMesh) {
             r.non_manifold_vertices,
             r.inconsistent_edges
         );
+    }
+}
+
+/// Déplie les plis (faces voisines de normales opposées) ; ne garde le résultat que s'il reste (après
+/// réparation) sans intersection.
+fn unfold(mesh: &mut TriMesh) {
+    if let Ok((mut m, _)) = surfoxide_remesh::unfold(mesh, -0.5, 5) {
+        if surfoxide_repair::repair_intersections(&mut m, 30).remaining == 0 {
+            *mesh = m;
+        }
     }
 }
 
@@ -216,7 +229,7 @@ pub fn pial_surface(
     let pial = loop {
         match pial_from_white(&white.mesh, &field, &params) {
             Ok(p) => break p,
-            Err(e) if attempt < 8 && !e.blocked.is_empty() => {
+            Err(e) if attempt < 10 && !e.blocked.is_empty() => {
                 if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
                     eprintln!(
                         "piale : essai {attempt}, {} sommets bloquants",
@@ -234,15 +247,39 @@ pub fn pial_surface(
                     ),
                     // Amas de micro-triangles : la fusion renumérote les sommets, les indices bloquants
                     // ne valent plus ; on réessaie tel quel.
-                    2 => clean_short_edges(&mut white.mesh, 0.05),
-                    // Lame mince de substance blanche : on lui fait de la place en la reculant.
-                    _ => {
-                        shrink_locally(&mut white.mesh, &e.blocked, attempt - 1);
+                    2 => {
+                        clean_short_edges(&mut white.mesh, 0.05);
+                        unfold(&mut white.mesh);
                     }
+                    // Lissage libre suivi d'une réparation (crête en lame de couteau).
+                    3..=5 => surfoxide_repair::relax_region(
+                        &mut white.mesh,
+                        &e.blocked,
+                        2 + attempt,
+                        5 * attempt,
+                        false,
+                    ),
+                    // En dernier recours, on recule localement la blanche pour faire de la place.
+                    _ => shrink_locally(&mut white.mesh, &e.blocked, attempt - 4),
                 }
                 attempt += 1;
             }
-            Err(e) => return Err(e.to_string()),
+            Err(e) => {
+                // Diagnostic : surface blanche et sommets bloquants au moment de l'échec.
+                if let Some(dir) = std::env::var_os("SURFOXIDE_DEBUG_DIR") {
+                    let dir = std::path::PathBuf::from(dir);
+                    let _ = surfoxide_io::gifti::write_surface(
+                        dir.join("blocked_white.surf.gii"),
+                        &white.mesh,
+                        &SurfaceMeta::default(),
+                    );
+                    let _ = std::fs::write(
+                        dir.join("blocked.json"),
+                        serde_json::to_string(&e.blocked).unwrap_or_default(),
+                    );
+                }
+                return Err(e.to_string());
+            }
         }
     };
     // Distance minimale du contrat : les sommets blancs restés trop près de la piale reculent un peu.
@@ -291,13 +328,19 @@ pub fn run(
         let grids = hemisphere_grids(&labels, table, hemi)?;
         let mut w = white_surface(&grids.white, params)?;
         // La piale peut détendre localement la surface blanche : on la construit avant d'écrire celle-ci.
+        // Un échec de la piale n'interrompt pas la session : la blanche est écrite, le rapport le note.
+        let mut pial_error = None;
         let pial = match pial_args {
             Some(args) => {
                 let t = Instant::now();
-                Some((
-                    pial_surface(&grids, &mut w, args, min_thickness)?,
-                    t.elapsed().as_secs_f64(),
-                ))
+                match pial_surface(&grids, &mut w, args, min_thickness) {
+                    Ok(p) => Some((p, t.elapsed().as_secs_f64())),
+                    Err(e) => {
+                        println!("hémisphère {hemi}, piale : erreur : {e}");
+                        pial_error = Some(e);
+                        None
+                    }
+                }
             }
             None => None,
         };
@@ -324,7 +367,10 @@ pub fn run(
             .map_err(|e| format!("{path}: {e}"))?;
         let mut report =
             serde_json::json!({ "white": white_report, "remesh_dropped": w.remesh_dropped });
-        let mut valid = white_report.valid;
+        let mut valid = white_report.valid && pial_error.is_none();
+        if let Some(e) = &pial_error {
+            report["pial_error"] = e.clone().into();
+        }
         // Sommets corticaux de la surface blanche (0 sur la face médiale : ventricules, noyaux gris).
         let cortical = surfoxide_mask::cortical_vertices(&w.mesh, &grids.cortex, 1.0, 3);
         let n_cortical = cortical.iter().filter(|&&c| c).count();

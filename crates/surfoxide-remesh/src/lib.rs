@@ -187,6 +187,78 @@ fn project(m: &mut HalfEdgeMesh, reference: &TriMesh, bvh: &Bvh, ref_normals: &[
     }
 }
 
+/// Cosinus de l'angle entre les normales des deux faces de l'arête `h`.
+fn dihedral_cos(m: &HalfEdgeMesh, h: u32) -> f64 {
+    let (n1, n2) = (
+        vec3::normalize(m.face_normal((h / 3) as usize)),
+        vec3::normalize(m.face_normal((m.twin(h) / 3) as usize)),
+    );
+    vec3::dot(n1, n2)
+}
+
+/// Déplie les plis : arêtes dont les deux faces ont des normales de cosinus inférieur à `max_cos` (surface
+/// repliée en nageoire, triangles en aiguille). Pour chacune, la plus courte arête de ses deux faces est
+/// fusionnée en son milieu, sous la link condition (topologie conservée) et sans créer de face d'aire
+/// nulle ; contrairement au remaillage, une face peut changer d'orientation, puisque c'est le pli qu'on
+/// défait. Rend la surface et le nombre de plis restants. Peut créer des intersections, à réparer ensuite.
+pub fn unfold(
+    mesh: &TriMesh,
+    max_cos: f64,
+    passes: usize,
+) -> Result<(TriMesh, usize), NotClosedManifold> {
+    let mut m = HalfEdgeMesh::from_mesh(mesh)?;
+    let folded = |m: &HalfEdgeMesh| -> Vec<u32> {
+        m.edges()
+            .into_iter()
+            .filter(|&h| m.face_alive[(h / 3) as usize] && dihedral_cos(m, h) < max_cos)
+            .collect()
+    };
+    for _ in 0..passes {
+        let edges = folded(&m);
+        if edges.is_empty() {
+            break;
+        }
+        for h in edges {
+            if !m.face_alive[(h / 3) as usize] || dihedral_cos(&m, h) >= max_cos {
+                continue;
+            }
+            let g = m.twin(h);
+            // Arêtes des deux faces, de la plus courte à la plus longue.
+            let mut cand: Vec<u32> = [h, m.next(h), m.prev(h), m.next(g), m.prev(g)].to_vec();
+            cand.sort_by(|&x, &y| m.edge_length(x).total_cmp(&m.edge_length(y)));
+            for e in cand {
+                let (a, b) = (m.from(e), m.to(e));
+                if !m.can_collapse(e) {
+                    continue;
+                }
+                let p = vec3::lerp(m.pos[a as usize], m.pos[b as usize], 0.5);
+                let degenerate = [a, b].iter().any(|&v| {
+                    m.outgoing(v).into_iter().any(|o| {
+                        let t = m.faces[(o / 3) as usize];
+                        if t.contains(&a) && t.contains(&b) {
+                            return false;
+                        }
+                        let q = t.map(|w| {
+                            if w == a || w == b {
+                                p
+                            } else {
+                                m.pos[w as usize]
+                            }
+                        });
+                        vec3::norm(vec3::triangle_normal(q[0], q[1], q[2])) < 1e-10
+                    })
+                });
+                if !degenerate {
+                    m.collapse(e, p);
+                    break;
+                }
+            }
+        }
+    }
+    let remaining = folded(&m).len();
+    Ok((m.to_mesh(), remaining))
+}
+
 /// Fusionne les arêtes plus courtes que `min_len` (sous la link condition, sans retourner de face) :
 /// supprime les amas de micro-triangles sans changer la topologie. Peut créer des intersections, à
 /// réparer ensuite.
@@ -249,6 +321,20 @@ mod tests {
             assert!((vec3::norm(*p) - 10.0).abs() < 0.05);
         }
         assert!((r.signed_volume() - s.signed_volume()).abs() / s.signed_volume() < 0.01);
+    }
+
+    #[test]
+    fn pli_deplie() {
+        // On replie la sphère : un sommet est tiré à travers son anneau, ses faces se retournent.
+        let mut s = icosphere(3, 10.0);
+        let p = s.vertices()[0];
+        s.vertices_mut()[0] = vec3::scale(p, 0.9);
+        let nb = surfoxide_core::adjacency::vertex_neighbors(&s);
+        let q = s.vertices()[nb[0][0] as usize];
+        s.vertices_mut()[nb[0][0] as usize] = vec3::lerp(q, s.vertices()[0], 1.6);
+        let (r, remaining) = unfold(&s, -0.5, 5).unwrap();
+        assert_eq!(remaining, 0);
+        assert!(topology_report(&r).is_sphere_like());
     }
 
     #[test]
