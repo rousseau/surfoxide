@@ -55,11 +55,7 @@ pub fn safe_update_against(mesh: &mut TriMesh, new: &[Vec3], obstacle: Option<&T
 /// sommets déplacés que `conflicts` signale, jusqu'à ce qu'aucun sommet déplacé ne soit en conflit. Les
 /// conflits qui ne touchent que des sommets immobiles existaient déjà : ils sont laissés tels quels, ce qui
 /// garantit la terminaison. Rend le nombre de sommets maintenus.
-pub fn safe_update_with(
-    mesh: &mut TriMesh,
-    new: &[Vec3],
-    conflicts: impl Fn(&TriMesh) -> HashSet<u32>,
-) -> usize {
+pub fn safe_update_with(mesh: &mut TriMesh, new: &[Vec3], conflicts: impl Fn(&TriMesh) -> HashSet<u32>) -> usize {
     assert_eq!(new.len(), mesh.n_vertices());
     let old = mesh.vertices().to_vec();
     mesh.vertices_mut().copy_from_slice(new);
@@ -97,19 +93,14 @@ pub fn repair_intersections(mesh: &mut TriMesh, max_rounds: usize) -> RepairRepo
     while remaining > 0 && rounds < max_rounds {
         let mut region: HashSet<u32> = intersecting_vertices(mesh);
         for _ in 0..1 + rounds / 2 {
-            let ring: Vec<u32> = region
-                .iter()
-                .flat_map(|&v| nb[v as usize].iter().copied())
-                .collect();
+            let ring: Vec<u32> = region.iter().flat_map(|&v| nb[v as usize].iter().copied()).collect();
             region.extend(ring);
         }
         for _ in 0..3 {
             let v = mesh.vertices().to_vec();
             for &i in &region {
                 let n = &nb[i as usize];
-                let mean = n
-                    .iter()
-                    .fold([0.0; 3], |acc, &j| vec3::add(acc, v[j as usize]));
+                let mean = n.iter().fold([0.0; 3], |acc, &j| vec3::add(acc, v[j as usize]));
                 let mean = vec3::scale(mean, 1.0 / n.len() as f64);
                 mesh.vertices_mut()[i as usize] = vec3::lerp(v[i as usize], mean, 0.5);
             }
@@ -130,10 +121,10 @@ pub fn repair_intersections(mesh: &mut TriMesh, max_rounds: usize) -> RepairRepo
 pub fn cone_direction(n: Vec3, face_normals: &[Vec3], min_cos: f64) -> Option<Vec3> {
     let mut d = vec3::normalize(n);
     for _ in 0..100 {
-        let (worst, cos) = face_normals.iter().map(|&f| (f, vec3::dot(d, f))).fold(
-            ([0.0; 3], f64::INFINITY),
-            |a, b| if b.1 < a.1 { b } else { a },
-        );
+        let (worst, cos) = face_normals
+            .iter()
+            .map(|&f| (f, vec3::dot(d, f)))
+            .fold(([0.0; 3], f64::INFINITY), |a, b| if b.1 < a.1 { b } else { a });
         if cos >= min_cos {
             return Some(d);
         }
@@ -160,20 +151,11 @@ pub fn sharp_vertices(mesh: &TriMesh, min_cos: f64) -> Vec<u32> {
 /// Lisse (laplacien, pas 1/2) les sommets `seeds` et leurs `rings` premiers anneaux, `iterations` fois.
 /// Avec `safe`, aucun pas ne crée d'intersection ; sans, les intersections créées sont réparées ensuite
 /// par [`repair_intersections`] (utile pour une lame mince que tout déplacement sûr laisse en place).
-pub fn relax_region(
-    mesh: &mut TriMesh,
-    seeds: &[u32],
-    rings: usize,
-    iterations: usize,
-    safe: bool,
-) {
+pub fn relax_region(mesh: &mut TriMesh, seeds: &[u32], rings: usize, iterations: usize, safe: bool) {
     let nb = vertex_neighbors(mesh);
     let mut region: HashSet<u32> = seeds.iter().copied().collect();
     for _ in 0..rings {
-        let ring: Vec<u32> = region
-            .iter()
-            .flat_map(|&v| nb[v as usize].iter().copied())
-            .collect();
+        let ring: Vec<u32> = region.iter().flat_map(|&v| nb[v as usize].iter().copied()).collect();
         region.extend(ring);
     }
     for _ in 0..iterations {
@@ -181,11 +163,8 @@ pub fn relax_region(
         let mut new = v.clone();
         for &i in &region {
             let n = &nb[i as usize];
-            let mean = n
-                .iter()
-                .fold([0.0; 3], |acc, &j| vec3::add(acc, v[j as usize]));
-            new[i as usize] =
-                vec3::lerp(v[i as usize], vec3::scale(mean, 1.0 / n.len() as f64), 0.5);
+            let mean = n.iter().fold([0.0; 3], |acc, &j| vec3::add(acc, v[j as usize]));
+            new[i as usize] = vec3::lerp(v[i as usize], vec3::scale(mean, 1.0 / n.len() as f64), 0.5);
         }
         if safe {
             safe_update(mesh, &new);
@@ -213,11 +192,8 @@ pub fn relax_sharp_vertices(mesh: &mut TriMesh, min_cos: f64, rounds: usize) -> 
         let mut new = v.clone();
         for &i in &region {
             let n = &nb[i as usize];
-            let mean = n
-                .iter()
-                .fold([0.0; 3], |acc, &j| vec3::add(acc, v[j as usize]));
-            new[i as usize] =
-                vec3::lerp(v[i as usize], vec3::scale(mean, 1.0 / n.len() as f64), 0.5);
+            let mean = n.iter().fold([0.0; 3], |acc, &j| vec3::add(acc, v[j as usize]));
+            new[i as usize] = vec3::lerp(v[i as usize], vec3::scale(mean, 1.0 / n.len() as f64), 0.5);
         }
         safe_update(mesh, &new);
     }
@@ -262,9 +238,7 @@ mod tests {
         let d = cone_direction([0.0, -1.0, 1.0], &f, 0.1).unwrap();
         assert!(f.iter().all(|&n| vec3::dot(d, n) >= 0.1));
         // Faces opposées : pas de direction commune.
-        assert!(
-            cone_direction([0.0, 0.0, 1.0], &[[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]], 0.1).is_none()
-        );
+        assert!(cone_direction([0.0, 0.0, 1.0], &[[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]], 0.1).is_none());
     }
 
     #[test]

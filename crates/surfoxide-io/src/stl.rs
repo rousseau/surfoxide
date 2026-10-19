@@ -47,12 +47,8 @@ pub fn read_stl(path: impl AsRef<Path>) -> Result<TriMesh> {
         let n = u32::from_le_bytes(bytes[80..84].try_into().unwrap()) as usize;
         for t in 0..n {
             let base = 84 + 50 * t + 12; // saute la normale
-            let f = |k: usize| {
-                f32::from_le_bytes(bytes[base + 4 * k..base + 4 * k + 4].try_into().unwrap())
-            };
-            triangles.push(std::array::from_fn(|v| {
-                std::array::from_fn(|c| f(3 * v + c))
-            }));
+            let f = |k: usize| f32::from_le_bytes(bytes[base + 4 * k..base + 4 * k + 4].try_into().unwrap());
+            triangles.push(std::array::from_fn(|v| std::array::from_fn(|c| f(3 * v + c))));
         }
     } else {
         let text = String::from_utf8_lossy(&bytes);

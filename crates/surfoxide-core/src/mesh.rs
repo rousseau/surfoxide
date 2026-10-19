@@ -16,11 +16,7 @@ pub struct TriMesh {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MeshError {
     /// Une face référence un sommet qui n'existe pas.
-    IndexOutOfRange {
-        face: usize,
-        index: u32,
-        n_vertices: usize,
-    },
+    IndexOutOfRange { face: usize, index: u32, n_vertices: usize },
     /// Une face répète un sommet (triangle dégénéré au sens combinatoire).
     RepeatedVertex { face: usize },
 }

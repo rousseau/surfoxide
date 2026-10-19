@@ -15,8 +15,7 @@ use crate::{build_mesh, format_err, IoError, Result};
 /// Écrit `mesh` et ses champs par sommet.
 pub fn write_vtp(path: impl AsRef<Path>, mesh: &TriMesh, fields: &[VertexField]) -> Result<()> {
     for f in fields {
-        f.check(mesh)
-            .map_err(|e| IoError::Format(format!("VTP : {e}")))?;
+        f.check(mesh).map_err(|e| IoError::Format(format!("VTP : {e}")))?;
     }
     let mut s = String::new();
     let w = |s: &mut String, t: &str| s.push_str(t);
@@ -30,11 +29,7 @@ pub fn write_vtp(path: impl AsRef<Path>, mesh: &TriMesh, fields: &[VertexField])
     if !fields.is_empty() {
         let _ = writeln!(s, "<PointData Scalars=\"{}\">", fields[0].name);
         for f in fields {
-            let _ = writeln!(
-                s,
-                "<DataArray type=\"Float64\" Name=\"{}\" format=\"ascii\">",
-                f.name
-            );
+            let _ = writeln!(s, "<DataArray type=\"Float64\" Name=\"{}\" format=\"ascii\">", f.name);
             for v in &f.values {
                 let _ = writeln!(s, "{v}");
             }
@@ -49,7 +44,10 @@ pub fn write_vtp(path: impl AsRef<Path>, mesh: &TriMesh, fields: &[VertexField])
     for p in mesh.vertices() {
         let _ = writeln!(s, "{} {} {}", p[0], p[1], p[2]);
     }
-    w(&mut s, "</DataArray>\n</Points>\n<Polys>\n<DataArray type=\"Int64\" Name=\"connectivity\" format=\"ascii\">\n");
+    w(
+        &mut s,
+        "</DataArray>\n</Points>\n<Polys>\n<DataArray type=\"Int64\" Name=\"connectivity\" format=\"ascii\">\n",
+    );
     for f in mesh.faces() {
         let _ = writeln!(s, "{} {} {}", f[0], f[1], f[2]);
     }
@@ -60,10 +58,7 @@ pub fn write_vtp(path: impl AsRef<Path>, mesh: &TriMesh, fields: &[VertexField])
     for i in 1..=mesh.n_faces() {
         let _ = writeln!(s, "{}", 3 * i);
     }
-    w(
-        &mut s,
-        "</DataArray>\n</Polys>\n</Piece>\n</PolyData>\n</VTKFile>\n",
-    );
+    w(&mut s, "</DataArray>\n</Polys>\n</Piece>\n</PolyData>\n</VTKFile>\n");
     std::fs::write(path, s)?;
     Ok(())
 }
@@ -136,12 +131,7 @@ pub fn read_vtp(path: impl AsRef<Path>) -> Result<(TriMesh, Vec<VertexField>)> {
         }
         prev = o as usize;
     }
-    let vertices = points
-        .as_chunks::<3>()
-        .0
-        .iter()
-        .map(|c| [c[0], c[1], c[2]])
-        .collect();
+    let vertices = points.as_chunks::<3>().0.iter().map(|c| [c[0], c[1], c[2]]).collect();
     let faces = conn
         .as_chunks::<3>()
         .0

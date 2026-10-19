@@ -17,9 +17,7 @@ pub fn taubin(mesh: &mut TriMesh, iterations: usize, lambda: f64, mu: f64) {
                 if n.is_empty() {
                     continue;
                 }
-                let mean = n
-                    .iter()
-                    .fold([0.0; 3], |acc, &j| vec3::add(acc, v[j as usize]));
+                let mean = n.iter().fold([0.0; 3], |acc, &j| vec3::add(acc, v[j as usize]));
                 let mean = vec3::scale(mean, 1.0 / n.len() as f64);
                 next[i] = vec3::add(v[i], vec3::scale(vec3::sub(mean, v[i]), factor));
             }
@@ -43,11 +41,7 @@ mod tests {
             *p = vec3::scale(*p, f);
         }
         let rough = |m: &TriMesh| {
-            m.vertices()
-                .iter()
-                .map(|p| (vec3::norm(*p) - 10.0).abs())
-                .sum::<f64>()
-                / m.n_vertices() as f64
+            m.vertices().iter().map(|p| (vec3::norm(*p) - 10.0).abs()).sum::<f64>() / m.n_vertices() as f64
         };
         let before = rough(&s);
         taubin(&mut s, 10, 0.5, -0.53);

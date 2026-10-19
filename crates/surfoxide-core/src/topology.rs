@@ -42,10 +42,7 @@ impl TopologyReport {
 
     /// Genre d'une surface fermée, orientée et d'un seul tenant : g = (2 − χ) / 2. `None` sinon.
     pub fn genus(&self) -> Option<i64> {
-        if self.is_closed_oriented_manifold()
-            && self.components == 1
-            && (2 - self.euler_characteristic) % 2 == 0
-        {
+        if self.is_closed_oriented_manifold() && self.components == 1 && (2 - self.euler_characteristic) % 2 == 0 {
             Some((2 - self.euler_characteristic) / 2)
         } else {
             None
@@ -174,9 +171,7 @@ fn count_non_manifold_vertices(mesh: &TriMesh) -> usize {
                 }
             }
         }
-        let n_groups = (0..incident.len())
-            .filter(|&i| root(&mut groups, i) == i)
-            .count();
+        let n_groups = (0..incident.len()).filter(|&i| root(&mut groups, i) == i).count();
         if n_groups > 1 {
             count += 1;
         }
@@ -207,11 +202,7 @@ mod tests {
 
     #[test]
     fn surface_ouverte_detectee() {
-        let mesh = TriMesh::new(
-            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-            vec![[0, 1, 2]],
-        )
-        .unwrap();
+        let mesh = TriMesh::new(vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], vec![[0, 1, 2]]).unwrap();
         let r = topology_report(&mesh);
         assert_eq!(r.boundary_edges, 3);
         assert_eq!(r.genus(), None);

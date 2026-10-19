@@ -156,15 +156,11 @@ fn device_for(backend: BackendArg) -> Result<Device, String> {
         #[cfg(feature = "cuda")]
         BackendArg::Cuda => Ok(Device::cuda(0)),
         #[cfg(not(feature = "cuda"))]
-        BackendArg::Cuda => Err(
-            "surfx compilé sans CUDA : relancer avec `cargo run --release --features cuda`".into(),
-        ),
+        BackendArg::Cuda => Err("surfx compilé sans CUDA : relancer avec `cargo run --release --features cuda`".into()),
         #[cfg(feature = "wgpu")]
         BackendArg::Wgpu => Ok(Device::wgpu(burn::tensor::DeviceKind::DefaultDevice)),
         #[cfg(not(feature = "wgpu"))]
-        BackendArg::Wgpu => Err(
-            "surfx compilé sans wgpu : relancer avec `cargo run --release --features wgpu`".into(),
-        ),
+        BackendArg::Wgpu => Err("surfx compilé sans wgpu : relancer avec `cargo run --release --features wgpu`".into()),
     }
 }
 
@@ -185,9 +181,7 @@ fn timed_matmul(a: &[f32], b: &[f32], n: usize, device: &Device) -> (Vec<f32>, f
 fn run_device(backend: BackendArg, n: usize) -> Result<(), String> {
     let device = device_for(backend)?;
     // Matrices déterministes, sans dépendance à un générateur aléatoire.
-    let a: Vec<f32> = (0..n * n)
-        .map(|i| ((i * 7919) % 1000) as f32 / 1000.0 - 0.5)
-        .collect();
+    let a: Vec<f32> = (0..n * n).map(|i| ((i * 7919) % 1000) as f32 / 1000.0 - 0.5).collect();
     let b: Vec<f32> = (0..n * n)
         .map(|i| ((i * 104729) % 1000) as f32 / 1000.0 - 0.5)
         .collect();
@@ -195,10 +189,7 @@ fn run_device(backend: BackendArg, n: usize) -> Result<(), String> {
     println!("device : {device:?}");
     let (c, secs) = timed_matmul(&a, &b, n, &device);
     let gflops = 2.0 * (n as f64).powi(3) / secs / 1e9;
-    println!(
-        "produit {n}×{n} : {:.1} ms ({gflops:.1} GFLOP/s)",
-        secs * 1e3
-    );
+    println!("produit {n}×{n} : {:.1} ms ({gflops:.1} GFLOP/s)", secs * 1e3);
 
     if !matches!(backend, BackendArg::Cpu) {
         let (reference, _) = timed_matmul(&a, &b, n, &Device::flex());
@@ -240,14 +231,8 @@ fn run_convert(input: &PathBuf, output: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn run_mask(
-    seg: &PathBuf,
-    table: &LabelTable,
-    hemi: Hemisphere,
-    out: &PathBuf,
-) -> Result<(), String> {
-    let (labels, header) =
-        surfoxide_io::nifti::read_labels(seg).map_err(|e| format!("{}: {e}", seg.display()))?;
+fn run_mask(seg: &PathBuf, table: &LabelTable, hemi: Hemisphere, out: &PathBuf) -> Result<(), String> {
+    let (labels, header) = surfoxide_io::nifti::read_labels(seg).map_err(|e| format!("{}: {e}", seg.display()))?;
     let mask = surfoxide_mask::white_mask(&labels, table, hemi);
     let n = mask.data().iter().filter(|&&b| b).count();
     let s = mask.spacing();
@@ -256,8 +241,7 @@ fn run_mask(
         n as f64 * s[0] * s[1] * s[2] / 1000.0
     );
     let mask = mask.map(|&b| b as u8);
-    surfoxide_io::nifti::write_u8(out, &mask, Some(&header))
-        .map_err(|e| format!("{}: {e}", out.display()))?;
+    surfoxide_io::nifti::write_u8(out, &mask, Some(&header)).map_err(|e| format!("{}: {e}", out.display()))?;
     println!("écrit : {}", out.display());
     Ok(())
 }
@@ -268,8 +252,7 @@ fn run_check(
     min_thickness: f64,
     json: Option<&PathBuf>,
 ) -> Result<(), String> {
-    let read =
-        |p: &PathBuf| surfoxide_io::read_mesh(p).map_err(|e| format!("{}: {e}", p.display()));
+    let read = |p: &PathBuf| surfoxide_io::read_mesh(p).map_err(|e| format!("{}: {e}", p.display()));
     let mesh = read(surface)?;
     let mut report = serde_json::json!({ "surface": surfoxide_check::check_surface(&mesh) });
     let mut valid = report["surface"]["valid"].as_bool() == Some(true);
@@ -313,12 +296,7 @@ fn main() -> ExitCode {
             Ok(())
         }
         Command::Convert { input, output } => run_convert(&input, &output),
-        Command::Mask {
-            seg,
-            labels,
-            hemi,
-            out,
-        } => run_mask(&seg, &labels, hemi, &out),
+        Command::Mask { seg, labels, hemi, out } => run_mask(&seg, &labels, hemi, &out),
         Command::Eval {
             surface,
             seg,
@@ -353,16 +331,7 @@ fn main() -> ExitCode {
             out,
         } => {
             let hemis = hemi.map_or(Hemisphere::BOTH.to_vec(), |h| vec![h]);
-            white::run(
-                &seg,
-                &labels,
-                &hemis,
-                &params,
-                Some(&pial),
-                min_thickness,
-                &out,
-            )
-            .and_then(contract)
+            white::run(&seg, &labels, &hemis, &params, Some(&pial), min_thickness, &out).and_then(contract)
         }
     };
     match result {

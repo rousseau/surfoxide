@@ -13,10 +13,7 @@ use surfoxide_core::{TriMesh, VertexField};
 #[derive(Debug, Clone, PartialEq)]
 pub enum TensorError {
     /// Forme inattendue (attendue, trouvée).
-    Shape {
-        expected: Vec<usize>,
-        found: Vec<usize>,
-    },
+    Shape { expected: Vec<usize>, found: Vec<usize> },
     /// Lecture des données du tenseur impossible.
     Read(String),
 }
@@ -36,12 +33,7 @@ impl std::error::Error for TensorError {}
 
 /// Positions des sommets, tenseur `[N, 3]` en `f32`.
 pub fn vertices_tensor(mesh: &TriMesh, device: &Device) -> Tensor<2> {
-    let data: Vec<f32> = mesh
-        .vertices()
-        .iter()
-        .flatten()
-        .map(|&x| x as f32)
-        .collect();
+    let data: Vec<f32> = mesh.vertices().iter().flatten().map(|&x| x as f32).collect();
     Tensor::from_floats(TensorData::new(data, [mesh.n_vertices(), 3]), device)
 }
 
@@ -85,10 +77,7 @@ pub fn field_from_tensor(name: &str, values: Tensor<1>) -> Result<VertexField, T
         .convert::<f32>()
         .try_into_vec()
         .map_err(|e| TensorError::Read(format!("{e:?}")))?;
-    Ok(VertexField::new(
-        name,
-        flat.into_iter().map(f64::from).collect(),
-    ))
+    Ok(VertexField::new(name, flat.into_iter().map(f64::from).collect()))
 }
 
 #[cfg(test)]
@@ -125,9 +114,6 @@ mod tests {
         let device = Device::flex();
         let s = icosphere(1, 1.0);
         let t = Tensor::<2>::zeros([3, 3], &device);
-        assert!(matches!(
-            mesh_with_vertices(&s, t),
-            Err(TensorError::Shape { .. })
-        ));
+        assert!(matches!(mesh_with_vertices(&s, t), Err(TensorError::Shape { .. })));
     }
 }

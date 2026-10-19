@@ -81,9 +81,7 @@ impl Eq for Item {}
 
 impl Ord for Item {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0
-            .total_cmp(&other.0)
-            .then_with(|| other.1.cmp(&self.1))
+        self.0.total_cmp(&other.0).then_with(|| other.1.cmp(&self.1))
     }
 }
 
@@ -128,12 +126,7 @@ fn neighbors26(dims: [usize; 3], idx: usize) -> impl Iterator<Item = usize> {
     let k = (idx / (dims[0] * dims[1])) as isize;
     (0..27).filter(|&b| b != 13).filter_map(move |b| {
         let (a, c, e) = (i + b % 3 - 1, j + (b / 3) % 3 - 1, k + b / 9 - 1);
-        (a >= 0
-            && c >= 0
-            && e >= 0
-            && (a as usize) < dims[0]
-            && (c as usize) < dims[1]
-            && (e as usize) < dims[2])
+        (a >= 0 && c >= 0 && e >= 0 && (a as usize) < dims[0] && (c as usize) < dims[1] && (e as usize) < dims[2])
             .then(|| a as usize + dims[0] * (c as usize + dims[1] * e as usize))
     })
 }
@@ -209,11 +202,7 @@ fn grow_background(phi: &Volume<f64>) -> Vec<bool> {
 ///
 /// `delta` (mm) est la valeur absolue donnée à φ sur les voxels dont le signe change : petite devant la
 /// taille du voxel, elle place la surface corrigée tout contre ces voxels.
-pub fn correct_topology(
-    phi: &Volume<f64>,
-    strategy: Strategy,
-    delta: f64,
-) -> Result<Correction, TopoFixError> {
+pub fn correct_topology(phi: &Volume<f64>, strategy: Strategy, delta: f64) -> Result<Correction, TopoFixError> {
     let dims = phi.dims();
     let p = phi.data();
     if !p.iter().any(|&x| x < 0.0) {
@@ -286,13 +275,7 @@ mod tests {
         }
         let chi: i64 = cells
             .iter()
-            .map(|&(x, y, z)| {
-                if (x % 2 + y % 2 + z % 2) % 2 == 0 {
-                    1
-                } else {
-                    -1
-                }
-            })
+            .map(|&(x, y, z)| if (x % 2 + y % 2 + z % 2) % 2 == 0 { 1 } else { -1 })
             .sum();
         (fg.len(), bg.len(), chi)
     }
@@ -316,17 +299,9 @@ mod tests {
     #[test]
     fn tore_corrige_en_boule() {
         let torus = solid_torus();
-        assert_eq!(
-            digital_topology(&torus),
-            (1, 1, 0),
-            "le tore de test a χ = 0"
-        );
+        assert_eq!(digital_topology(&torus), (1, 1, 0), "le tore de test a χ = 0");
         let phi = signed_distance(&torus);
-        for strategy in [
-            Strategy::GrowObject,
-            Strategy::GrowBackground,
-            Strategy::Best,
-        ] {
+        for strategy in [Strategy::GrowObject, Strategy::GrowBackground, Strategy::Best] {
             let c = correct_topology(&phi, strategy, 0.01).unwrap();
             assert_eq!(digital_topology(&c.object), (1, 1, 1), "{strategy:?}");
             match c.strategy {
@@ -349,9 +324,7 @@ mod tests {
         for k in 0..20 {
             for j in 0..20 {
                 for i in 0..20 {
-                    let d2 = (i as f64 - 9.5).powi(2)
-                        + (j as f64 - 9.5).powi(2)
-                        + (k as f64 - 9.5).powi(2);
+                    let d2 = (i as f64 - 9.5).powi(2) + (j as f64 - 9.5).powi(2) + (k as f64 - 9.5).powi(2);
                     v.set(i, j, k, d2 < 49.0);
                 }
             }
@@ -367,9 +340,7 @@ mod tests {
         for k in 0..20 {
             for j in 0..20 {
                 for i in 0..20 {
-                    let d2 = (i as f64 - 9.5).powi(2)
-                        + (j as f64 - 9.5).powi(2)
-                        + (k as f64 - 9.5).powi(2);
+                    let d2 = (i as f64 - 9.5).powi(2) + (j as f64 - 9.5).powi(2) + (k as f64 - 9.5).powi(2);
                     v.set(i, j, k, d2 < 64.0 && d2 > 9.0);
                 }
             }

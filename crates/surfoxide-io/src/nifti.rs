@@ -26,11 +26,7 @@ pub fn header_affine(h: &NiftiHeader) -> Affine {
     }
     let [_, dx, dy, dz, ..] = h.pixdim.map(f64::from);
     if h.qform_code > 0 {
-        let (b, c, d) = (
-            f64::from(h.quatern_b),
-            f64::from(h.quatern_c),
-            f64::from(h.quatern_d),
-        );
+        let (b, c, d) = (f64::from(h.quatern_b), f64::from(h.quatern_c), f64::from(h.quatern_d));
         let a = (1.0 - (b * b + c * c + d * d)).max(0.0).sqrt();
         let qfac = if h.pixdim[0] < 0.0 { -1.0 } else { 1.0 };
         let rot = [
@@ -94,10 +90,7 @@ where
     let array = obj.into_volume().into_ndarray::<T>().map_err(nifti_err)?;
     let shape = array.shape().to_vec();
     if shape.len() < 3 || shape[3..].iter().any(|&n| n != 1) {
-        return format_err(format!(
-            "{} : volume 3D attendu, dimensions {shape:?}",
-            path.display()
-        ));
+        return format_err(format!("{} : volume 3D attendu, dimensions {shape:?}", path.display()));
     }
     let dims = [shape[0], shape[1], shape[2]];
     let n = dims[0] * dims[1] * dims[2];

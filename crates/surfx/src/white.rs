@@ -54,22 +54,10 @@ pub struct HemisphereGrids {
     pub cortex: Volume<bool>,
 }
 
-pub fn hemisphere_grids(
-    labels: &Volume<i32>,
-    table: &LabelTable,
-    hemi: Hemisphere,
-) -> Result<HemisphereGrids, String> {
+pub fn hemisphere_grids(labels: &Volume<i32>, table: &LabelTable, hemi: Hemisphere) -> Result<HemisphereGrids, String> {
     let (white, cortex) = surfoxide_mask::hemisphere_masks(labels, table, hemi);
-    let both = white.with_data(
-        white
-            .data()
-            .iter()
-            .zip(cortex.data())
-            .map(|(&a, &b)| a || b)
-            .collect(),
-    );
-    let (_, origin) = crop_to(&both, |&b| b, 4, false)
-        .ok_or_else(|| format!("hémisphère {hemi} : masque vide"))?;
+    let both = white.with_data(white.data().iter().zip(cortex.data()).map(|(&a, &b)| a || b).collect());
+    let (_, origin) = crop_to(&both, |&b| b, 4, false).ok_or_else(|| format!("hémisphère {hemi} : masque vide"))?;
     let (bbox, _) = crop_to(&both, |&b| b, 4, false).unwrap();
     let dims = bbox.dims();
     Ok(HemisphereGrids {
@@ -98,8 +86,7 @@ pub struct WhiteSurface {
 pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteSurface, String> {
     let phi = gaussian_blur(&signed_distance(mask), params.sigma);
     let min_spacing = mask.spacing().into_iter().fold(f64::INFINITY, f64::min);
-    let c =
-        correct_topology(&phi, Strategy::Best, 0.05 * min_spacing).map_err(|e| e.to_string())?;
+    let c = correct_topology(&phi, Strategy::Best, 0.05 * min_spacing).map_err(|e| e.to_string())?;
     // Points à au moins 0,2 voxel des centres : une lame ou un sillon d'un voxel garde une épaisseur
     // d'au moins 0,2 voxel, où la piale peut passer.
     let mut mesh = surfoxide_extract::marching_cubes(&c.levelset, 0.2);
@@ -231,10 +218,7 @@ pub fn pial_surface(
             Ok(p) => break p,
             Err(e) if attempt < 10 && !e.blocked.is_empty() => {
                 if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
-                    eprintln!(
-                        "piale : essai {attempt}, {} sommets bloquants",
-                        e.blocked.len()
-                    );
+                    eprintln!("piale : essai {attempt}, {} sommets bloquants", e.blocked.len());
                 }
                 match attempt {
                     // Détente sans créer d'intersection.
@@ -252,13 +236,9 @@ pub fn pial_surface(
                         unfold(&mut white.mesh);
                     }
                     // Lissage libre suivi d'une réparation (crête en lame de couteau).
-                    3..=5 => surfoxide_repair::relax_region(
-                        &mut white.mesh,
-                        &e.blocked,
-                        2 + attempt,
-                        5 * attempt,
-                        false,
-                    ),
+                    3..=5 => {
+                        surfoxide_repair::relax_region(&mut white.mesh, &e.blocked, 2 + attempt, 5 * attempt, false)
+                    }
                     // En dernier recours, on recule localement la blanche pour faire de la place.
                     _ => shrink_locally(&mut white.mesh, &e.blocked, attempt - 4),
                 }
@@ -298,10 +278,8 @@ fn meta(hemi: Hemisphere, secondary: &str, labels: &Volume<i32>, seg: &Path) -> 
     if let Some(name) = seg.file_name().and_then(|n| n.to_str()) {
         meta.other.insert("SourceImage".into(), name.into());
     }
-    meta.other.insert(
-        "Generator".into(),
-        format!("surfoxide {}", env!("CARGO_PKG_VERSION")),
-    );
+    meta.other
+        .insert("Generator".into(), format!("surfoxide {}", env!("CARGO_PKG_VERSION")));
     meta
 }
 
@@ -320,8 +298,7 @@ pub fn run(
     min_thickness: f64,
     out_prefix: &Path,
 ) -> Result<bool, String> {
-    let (labels, _) =
-        surfoxide_io::nifti::read_labels(seg).map_err(|e| format!("{}: {e}", seg.display()))?;
+    let (labels, _) = surfoxide_io::nifti::read_labels(seg).map_err(|e| format!("{}: {e}", seg.display()))?;
     let mut all_valid = true;
     for &hemi in hemis {
         let t = Instant::now();
@@ -365,8 +342,7 @@ pub fn run(
         let path = format!("{prefix}_white.surf.gii");
         surfoxide_io::gifti::write_surface(&path, &w.mesh, &meta(hemi, "GrayWhite", &labels, seg))
             .map_err(|e| format!("{path}: {e}"))?;
-        let mut report =
-            serde_json::json!({ "white": white_report, "remesh_dropped": w.remesh_dropped });
+        let mut report = serde_json::json!({ "white": white_report, "remesh_dropped": w.remesh_dropped });
         let mut valid = white_report.valid && pial_error.is_none();
         if let Some(e) = &pial_error {
             report["pial_error"] = e.clone().into();
@@ -408,12 +384,8 @@ pub fn run(
             );
             valid &= pial_report.valid && pair.valid;
             let path = format!("{prefix}_pial.surf.gii");
-            surfoxide_io::gifti::write_surface(
-                &path,
-                &pial.mesh,
-                &meta(hemi, "Pial", &labels, seg),
-            )
-            .map_err(|e| format!("{path}: {e}"))?;
+            surfoxide_io::gifti::write_surface(&path, &pial.mesh, &meta(hemi, "Pial", &labels, seg))
+                .map_err(|e| format!("{path}: {e}"))?;
             let path = format!("{prefix}_thickness.shape.gii");
             surfoxide_io::gifti::write_fields(
                 &path,

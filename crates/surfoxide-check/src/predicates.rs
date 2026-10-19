@@ -24,9 +24,7 @@ fn o3(a: Vec3, b: Vec3, c: Vec3, d: Vec3) -> i8 {
 /// Projection 2D sur le plan de coordonnées le plus proche du plan du triangle (abc).
 fn projector(a: Vec3, b: Vec3, c: Vec3) -> impl Fn(Vec3) -> Coord<f64> {
     let n = vec3::triangle_normal(a, b, c);
-    let axis = (0..3)
-        .max_by(|&i, &j| n[i].abs().total_cmp(&n[j].abs()))
-        .unwrap();
+    let axis = (0..3).max_by(|&i, &j| n[i].abs().total_cmp(&n[j].abs())).unwrap();
     let (u, v) = ((axis + 1) % 3, (axis + 2) % 3);
     move |p: Vec3| Coord { x: p[u], y: p[v] }
 }
@@ -46,10 +44,7 @@ fn seg_seg_2d(p: Coord<f64>, q: Coord<f64>, a: Coord<f64>, b: Coord<f64>) -> boo
     let on = |x: Coord<f64>, y: Coord<f64>, z: Coord<f64>| {
         x.x.min(y.x) <= z.x && z.x <= x.x.max(y.x) && x.y.min(y.y) <= z.y && z.y <= x.y.max(y.y)
     };
-    (d1 == 0 && on(p, q, a))
-        || (d2 == 0 && on(p, q, b))
-        || (d3 == 0 && on(a, b, p))
-        || (d4 == 0 && on(a, b, q))
+    (d1 == 0 && on(p, q, a)) || (d2 == 0 && on(p, q, b)) || (d3 == 0 && on(a, b, p)) || (d4 == 0 && on(a, b, q))
 }
 
 /// Point `p` du plan dans le triangle fermé (abc), quelle que soit son orientation.
@@ -102,19 +97,10 @@ pub fn shared_vertex_intersect(v: Vec3, a: Vec3, b: Vec3, c: Vec3, d: Vec3) -> b
     let pr = projector(v, a, b);
     let (v2, a2, b2, c2, d2) = (pr(v), pr(a), pr(b), pr(c), pr(d));
     // Orientation des secteurs : (a, b) et (c, d) parcourus dans le sens direct autour de v.
-    let (a2, b2) = if o2(v2, a2, b2) >= 0 {
-        (a2, b2)
-    } else {
-        (b2, a2)
-    };
-    let (c2, d2) = if o2(v2, c2, d2) >= 0 {
-        (c2, d2)
-    } else {
-        (d2, c2)
-    };
+    let (a2, b2) = if o2(v2, a2, b2) >= 0 { (a2, b2) } else { (b2, a2) };
+    let (c2, d2) = if o2(v2, c2, d2) >= 0 { (c2, d2) } else { (d2, c2) };
     // Direction x strictement dans le secteur (p, q) (secteur < 180°, car triangle non dégénéré).
-    let strictly_in =
-        |x: Coord<f64>, p: Coord<f64>, q: Coord<f64>| o2(v2, p, x) > 0 && o2(v2, x, q) > 0;
+    let strictly_in = |x: Coord<f64>, p: Coord<f64>, q: Coord<f64>| o2(v2, p, x) > 0 && o2(v2, x, q) > 0;
     // Directions confondues (même demi-droite).
     let same_ray = |x: Coord<f64>, y: Coord<f64>| {
         o2(v2, x, y) == 0 && (x.x - v2.x) * (y.x - v2.x) + (x.y - v2.y) * (y.y - v2.y) > 0.0
@@ -213,12 +199,7 @@ mod tests {
     fn arete_commune_repliee() {
         let (a, b) = ([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
         assert!(shared_edge_overlap(a, b, [0.5, 1.0, 0.0], [0.3, 0.5, 0.0]));
-        assert!(!shared_edge_overlap(
-            a,
-            b,
-            [0.5, 1.0, 0.0],
-            [0.5, -1.0, 0.0]
-        ));
+        assert!(!shared_edge_overlap(a, b, [0.5, 1.0, 0.0], [0.5, -1.0, 0.0]));
         assert!(!shared_edge_overlap(a, b, [0.5, 1.0, 0.0], [0.5, 1.0, 1.0]));
     }
 

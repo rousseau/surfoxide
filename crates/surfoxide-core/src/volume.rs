@@ -162,8 +162,7 @@ pub fn invert_affine(a: &Affine) -> Option<Affine> {
 
 /// Déterminant de la partie linéaire : négatif si l'affine inverse l'orientation (repère indirect).
 pub fn affine_determinant(a: &Affine) -> f64 {
-    a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
-        - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+    a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
         + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0])
 }
 

@@ -73,10 +73,7 @@ pub fn icosphere(level: u32, radius: f64) -> TriMesh {
         }
         faces = next;
     }
-    let vertices = vertices
-        .into_iter()
-        .map(|p| p.map(|x| x * radius))
-        .collect();
+    let vertices = vertices.into_iter().map(|p| p.map(|x| x * radius)).collect();
     TriMesh::new(vertices, faces).expect("icosphère valide par construction")
 }
 
@@ -115,10 +112,7 @@ mod tests {
         let exact = 4.0 / 3.0 * std::f64::consts::PI * 8.0;
         let v = s.signed_volume();
         assert!(v > 0.0, "normales rentrantes");
-        assert!(
-            (v - exact).abs() / exact < 0.01,
-            "volume {v} contre {exact}"
-        );
+        assert!((v - exact).abs() / exact < 0.01, "volume {v} contre {exact}");
     }
 
     #[test]
@@ -127,9 +121,6 @@ mod tests {
         let exact = 2.0 * std::f64::consts::PI.powi(2) * 3.0 * 1.0;
         let v = t.signed_volume();
         assert!(v > 0.0, "normales rentrantes");
-        assert!(
-            (v - exact).abs() / exact < 0.01,
-            "volume {v} contre {exact}"
-        );
+        assert!((v - exact).abs() / exact < 0.01, "volume {v} contre {exact}");
     }
 }

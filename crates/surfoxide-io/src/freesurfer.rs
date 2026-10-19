@@ -43,10 +43,7 @@ pub fn read_surf(path: impl AsRef<Path>) -> Result<TriMesh> {
     let path = path.as_ref();
     let bytes = std::fs::read(path)?;
     if !bytes.starts_with(&TRIANGLE_MAGIC) {
-        return format_err(format!(
-            "{} : pas une surface FreeSurfer triangulaire",
-            path.display()
-        ));
+        return format_err(format!("{} : pas une surface FreeSurfer triangulaire", path.display()));
     }
     // Commentaire « created by … » terminé par deux retours à la ligne.
     let start = bytes[3..]
@@ -54,10 +51,7 @@ pub fn read_surf(path: impl AsRef<Path>) -> Result<TriMesh> {
         .position(|w| w == b"\n\n")
         .map(|p| p + 5)
         .ok_or_else(|| crate::IoError::Format("FreeSurfer : commentaire non terminé".into()))?;
-    let mut c = Cursor {
-        b: &bytes,
-        pos: start,
-    };
+    let mut c = Cursor { b: &bytes, pos: start };
     let nv = c.i32()? as usize;
     let nf = c.i32()? as usize;
     let mut vertices = Vec::with_capacity(nv);
@@ -130,9 +124,7 @@ pub fn read_curv(path: impl AsRef<Path>) -> Result<VertexField> {
             path.display()
         ));
     }
-    let values = (0..nv)
-        .map(|_| c.f32().map(f64::from))
-        .collect::<Result<_>>()?;
+    let values = (0..nv).map(|_| c.f32().map(f64::from)).collect::<Result<_>>()?;
     let name = path
         .file_name()
         .and_then(|n| n.to_str())

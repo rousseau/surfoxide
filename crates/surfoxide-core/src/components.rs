@@ -56,13 +56,7 @@ pub fn label_components(mask: &Volume<bool>, conn: Connectivity) -> (Volume<u32>
             let [i, j, k] = mask.coords(idx);
             for o in &offsets {
                 let (a, b, c) = (i as isize + o[0], j as isize + o[1], k as isize + o[2]);
-                if a < 0
-                    || b < 0
-                    || c < 0
-                    || a >= nx as isize
-                    || b >= ny as isize
-                    || c >= nz as isize
-                {
+                if a < 0 || b < 0 || c < 0 || a >= nx as isize || b >= ny as isize || c >= nz as isize {
                     continue;
                 }
                 let n = mask.index(a as usize, b as usize, c as usize);
@@ -105,8 +99,7 @@ pub fn fill_cavities(mask: &Volume<bool>, background_conn: Connectivity) -> Volu
     for k in 0..nz {
         for j in 0..ny {
             for i in 0..nx {
-                let border =
-                    i == 0 || j == 0 || k == 0 || i == nx - 1 || j == ny - 1 || k == nz - 1;
+                let border = i == 0 || j == 0 || k == 0 || i == nx - 1 || j == ny - 1 || k == nz - 1;
                 let idx = mask.index(i, j, k);
                 if border && !mask.data()[idx] {
                     outside[idx] = true;

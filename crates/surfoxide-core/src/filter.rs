@@ -31,8 +31,7 @@ pub fn gaussian_blur(vol: &Volume<f64>, sigma_mm: f64) -> Volume<f64> {
                 for q in 0..n {
                     let mut acc = 0.0;
                     for (t, w) in kernel.iter().enumerate() {
-                        let p =
-                            (q as isize + t as isize - radius).clamp(0, n as isize - 1) as usize;
+                        let p = (q as isize + t as isize - radius).clamp(0, n as isize - 1) as usize;
                         acc += w * line[p];
                     }
                     data[base + q * stride[axis]] = acc / norm;
@@ -44,10 +43,7 @@ pub fn gaussian_blur(vol: &Volume<f64>, sigma_mm: f64) -> Volume<f64> {
 }
 
 /// Boîte englobante (bornes inclusives) des voxels où `pred` est vrai ; `None` si aucun.
-pub fn bounding_box<T>(
-    vol: &Volume<T>,
-    pred: impl Fn(&T) -> bool,
-) -> Option<([usize; 3], [usize; 3])> {
+pub fn bounding_box<T>(vol: &Volume<T>, pred: impl Fn(&T) -> bool) -> Option<([usize; 3], [usize; 3])> {
     let mut lo = [usize::MAX; 3];
     let mut hi = [0usize; 3];
     let mut any = false;
@@ -67,12 +63,7 @@ pub fn bounding_box<T>(
 /// Sous-volume de dimensions `dims` dont le voxel (0, 0, 0) est le voxel `origin` (éventuellement
 /// négatif) de `vol` ; les voxels hors de `vol` valent `fill`. L'affine est décalée en conséquence : un
 /// même point garde ses coordonnées monde.
-pub fn extract<T: Copy>(
-    vol: &Volume<T>,
-    origin: [isize; 3],
-    dims: [usize; 3],
-    fill: T,
-) -> Volume<T> {
+pub fn extract<T: Copy>(vol: &Volume<T>, origin: [isize; 3], dims: [usize; 3], fill: T) -> Volume<T> {
     let mut data = Vec::with_capacity(dims[0] * dims[1] * dims[2]);
     for k in 0..dims[2] as isize {
         for j in 0..dims[1] as isize {

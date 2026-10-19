@@ -159,8 +159,7 @@ fn parse_document(xml: &str) -> Result<Document> {
                                 values.len()
                             ));
                         }
-                        let values = if attrs.get("ArrayIndexingOrder").map(String::as_str)
-                            == Some("ColumnMajorOrder")
+                        let values = if attrs.get("ArrayIndexingOrder").map(String::as_str) == Some("ColumnMajorOrder")
                             && dims.len() == 2
                         {
                             transpose(&values, dims[0], dims[1])
@@ -212,10 +211,7 @@ fn transpose(v: &[f64], rows: usize, cols: usize) -> Vec<f64> {
 }
 
 fn decode_data(attrs: &BTreeMap<String, String>, text: &str) -> Result<Vec<f64>> {
-    if attrs
-        .get("ExternalFileName")
-        .is_some_and(|s| !s.trim().is_empty())
-    {
+    if attrs.get("ExternalFileName").is_some_and(|s| !s.trim().is_empty()) {
         return format_err("GIfTI : fichier de données externe non pris en charge");
     }
     let dtype = attrs.get("DataType").map(String::as_str).unwrap_or("");
@@ -283,10 +279,7 @@ fn read_document(path: &Path) -> Result<Document> {
 }
 
 fn parse_affine(s: &str) -> Option<Affine> {
-    let v: Vec<f64> = s
-        .split_ascii_whitespace()
-        .filter_map(|t| t.parse().ok())
-        .collect();
+    let v: Vec<f64> = s.split_ascii_whitespace().filter_map(|t| t.parse().ok()).collect();
     (v.len() == 16).then(|| std::array::from_fn(|r| std::array::from_fn(|c| v[4 * r + c])))
 }
 
@@ -305,10 +298,7 @@ pub fn read_surface(path: impl AsRef<Path>) -> Result<(TriMesh, SurfaceMeta)> {
         .find(|a| a.intent == "NIFTI_INTENT_TRIANGLE")
         .ok_or_else(|| IoError::Format(format!("{} : pas de TRIANGLE", path.display())))?;
     if points.dims.get(1) != Some(&3) || tris.dims.get(1) != Some(&3) {
-        return format_err(format!(
-            "{} : tableaux de largeur 3 attendus",
-            path.display()
-        ));
+        return format_err(format!("{} : tableaux de largeur 3 attendus", path.display()));
     }
     let vertices = points
         .values
@@ -344,10 +334,7 @@ pub fn read_surface(path: impl AsRef<Path>) -> Result<(TriMesh, SurfaceMeta)> {
     for (k, v) in &doc.meta {
         if !matches!(
             k.as_str(),
-            "AnatomicalStructurePrimary"
-                | "AnatomicalStructureSecondary"
-                | "GeometricType"
-                | "SourceAffine"
+            "AnatomicalStructurePrimary" | "AnatomicalStructureSecondary" | "GeometricType" | "SourceAffine"
         ) {
             meta.other.insert(k.clone(), v.clone());
         }
@@ -424,14 +411,8 @@ fn write_array(
     world_transform: bool,
 ) -> Result<()> {
     let (dtype, bytes): (&str, Vec<u8>) = match payload {
-        Payload::F32(v) => (
-            "NIFTI_TYPE_FLOAT32",
-            v.iter().flat_map(|x| x.to_le_bytes()).collect(),
-        ),
-        Payload::I32(v) => (
-            "NIFTI_TYPE_INT32",
-            v.iter().flat_map(|x| x.to_le_bytes()).collect(),
-        ),
+        Payload::F32(v) => ("NIFTI_TYPE_FLOAT32", v.iter().flat_map(|x| x.to_le_bytes()).collect()),
+        Payload::I32(v) => ("NIFTI_TYPE_INT32", v.iter().flat_map(|x| x.to_le_bytes()).collect()),
     };
     let dim_attrs: String = dims
         .iter()
@@ -485,12 +466,7 @@ pub fn write_surface(path: impl AsRef<Path>, mesh: &TriMesh, meta: &SurfaceMeta)
         }
     }
     let mut out = header(2, &file_meta(meta));
-    let coords: Vec<f32> = mesh
-        .vertices()
-        .iter()
-        .flatten()
-        .map(|&x| x as f32)
-        .collect();
+    let coords: Vec<f32> = mesh.vertices().iter().flatten().map(|&x| x as f32).collect();
     write_array(
         &mut out,
         "NIFTI_INTENT_POINTSET",
@@ -514,11 +490,7 @@ pub fn write_surface(path: impl AsRef<Path>, mesh: &TriMesh, meta: &SurfaceMeta)
 }
 
 /// Écrit des champs par sommet (`.shape.gii`), un tableau NIFTI_INTENT_SHAPE par champ.
-pub fn write_fields(
-    path: impl AsRef<Path>,
-    fields: &[VertexField],
-    meta: &SurfaceMeta,
-) -> Result<()> {
+pub fn write_fields(path: impl AsRef<Path>, fields: &[VertexField], meta: &SurfaceMeta) -> Result<()> {
     let mut out = header(fields.len(), &file_meta(meta));
     for f in fields {
         let mut m = vec![("Name".to_string(), f.name.clone())];
@@ -526,14 +498,7 @@ pub fn write_fields(
             m.push(("AnatomicalStructurePrimary".into(), p.clone()));
         }
         let v: Vec<f32> = f.values.iter().map(|&x| x as f32).collect();
-        write_array(
-            &mut out,
-            "NIFTI_INTENT_SHAPE",
-            &[v.len()],
-            &m,
-            Payload::F32(&v),
-            false,
-        )?;
+        write_array(&mut out, "NIFTI_INTENT_SHAPE", &[v.len()], &m, Payload::F32(&v), false)?;
     }
     out.push_str("</GIFTI>\n");
     std::fs::write(path, out)?;
@@ -556,8 +521,7 @@ mod tests {
             [0.0, 0.0, 0.5, -20.0],
             [0.0, 0.0, 0.0, 1.0],
         ]);
-        meta.other
-            .insert("SourceImage".into(), "sub-01_dseg.nii.gz".into());
+        meta.other.insert("SourceImage".into(), "sub-01_dseg.nii.gz".into());
         let p = tmp("s.surf.gii");
         write_surface(&p, &s, &meta).unwrap();
         let (back, m) = read_surface(&p).unwrap();
@@ -592,10 +556,7 @@ mod tests {
         let p = tmp("ascii.surf.gii");
         std::fs::write(&p, xml).unwrap();
         let (m, _) = read_surface(&p).unwrap();
-        assert_eq!(
-            m.vertices(),
-            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
-        );
+        assert_eq!(m.vertices(), &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]);
     }
 
     /// Surfaces de l'atlas fœtal dHCP (écrites par gifticlib et Workbench).

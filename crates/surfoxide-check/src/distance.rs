@@ -60,15 +60,9 @@ mod tests {
     #[test]
     fn plus_proche_point() {
         let (a, b, c) = ([0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0]);
-        assert_eq!(
-            closest_point_triangle([0.5, 0.5, 3.0], a, b, c),
-            [0.5, 0.5, 0.0]
-        );
+        assert_eq!(closest_point_triangle([0.5, 0.5, 3.0], a, b, c), [0.5, 0.5, 0.0]);
         assert_eq!(closest_point_triangle([-1.0, -1.0, 0.0], a, b, c), a);
-        assert_eq!(
-            closest_point_triangle([1.0, -1.0, 0.0], a, b, c),
-            [1.0, 0.0, 0.0]
-        );
+        assert_eq!(closest_point_triangle([1.0, -1.0, 0.0], a, b, c), [1.0, 0.0, 0.0]);
         assert!((distance2_triangle([2.0, 2.0, 0.0], a, b, c) - 2.0).abs() < 1e-12);
     }
 }

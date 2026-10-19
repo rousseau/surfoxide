@@ -19,11 +19,7 @@ struct Tables {
 }
 
 fn offset(b: usize) -> [i32; 3] {
-    [
-        (b % 3) as i32 - 1,
-        ((b / 3) % 3) as i32 - 1,
-        (b / 9) as i32 - 1,
-    ]
+    [(b % 3) as i32 - 1, ((b / 3) % 3) as i32 - 1, (b / 9) as i32 - 1]
 }
 
 fn tables() -> &'static Tables {
@@ -126,19 +122,10 @@ mod tests {
         let build = |with_center: bool| {
             let mut v = Volume::filled([5, 5, 5], false, IDENTITY);
             for b in 0..27 {
-                let on = if b == 13 {
-                    with_center
-                } else {
-                    nbhd >> b & 1 == 1
-                };
+                let on = if b == 13 { with_center } else { nbhd >> b & 1 == 1 };
                 if on {
                     let o = offset(b);
-                    v.set(
-                        (o[0] + 2) as usize,
-                        (o[1] + 2) as usize,
-                        (o[2] + 2) as usize,
-                        true,
-                    );
+                    v.set((o[0] + 2) as usize, (o[1] + 2) as usize, (o[2] + 2) as usize, true);
                 }
             }
             crate::tests::digital_topology(&v)
@@ -163,20 +150,14 @@ mod tests {
             assert_eq!(is_simple(bits), brute(bits), "voisinage {bits:027b}");
             simples += is_simple(bits) as usize;
         }
-        assert!(
-            simples > 200,
-            "trop peu de points simples testés ({simples})"
-        );
+        assert!(simples > 200, "trop peu de points simples testés ({simples})");
     }
 
     #[test]
     fn cas_elementaires() {
         assert!(!is_simple(0), "point isolé");
         let t = tables();
-        assert!(
-            !is_simple(t.n26),
-            "point intérieur : son ajout bouche une cavité"
-        );
+        assert!(!is_simple(t.n26), "point intérieur : son ajout bouche une cavité");
         // Un seul voisin par une face : simple.
         assert!(is_simple(1 << 12));
         // Deux voisins opposés par une face : l'ajout relierait deux composantes.

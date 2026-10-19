@@ -98,9 +98,7 @@ impl Bvh {
     }
 
     fn build(nodes: &mut Vec<Node>, node: usize, items: &mut [u32], offset: usize, boxes: &[Aabb]) {
-        let bbox = items
-            .iter()
-            .fold(Aabb::EMPTY, |b, &i| b.union(boxes[i as usize]));
+        let bbox = items.iter().fold(Aabb::EMPTY, |b, &i| b.union(boxes[i as usize]));
         if items.len() <= LEAF {
             nodes[node] = Node {
                 bbox,
@@ -113,10 +111,7 @@ impl Bvh {
             .iter()
             .fold(Aabb::EMPTY, |b, &i| b.grow(boxes[i as usize].centroid()));
         let axis = (0..3)
-            .max_by(|&a, &b| {
-                (centroids.max[a] - centroids.min[a])
-                    .total_cmp(&(centroids.max[b] - centroids.min[b]))
-            })
+            .max_by(|&a, &b| (centroids.max[a] - centroids.min[a]).total_cmp(&(centroids.max[b] - centroids.min[b])))
             .unwrap();
         let mid = items.len() / 2;
         items.select_nth_unstable_by(mid, |&a, &b| {
@@ -196,10 +191,7 @@ impl Bvh {
                 }
             } else {
                 let (a, b) = (node.start as usize, node.start as usize + 1);
-                let (da, db) = (
-                    self.nodes[a].bbox.distance2(p),
-                    self.nodes[b].bbox.distance2(p),
-                );
+                let (da, db) = (self.nodes[a].bbox.distance2(p), self.nodes[b].bbox.distance2(p));
                 // Le plus proche est dépilé en premier.
                 if da < db {
                     stack.push((b, db));

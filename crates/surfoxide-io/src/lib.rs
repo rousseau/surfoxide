@@ -77,10 +77,7 @@ impl MeshFormat {
     /// `.gii`, `.vtp`, `.ply`, `.stl` ; tout autre nom (`lh.white`, `rh.pial`, `.surf`…) est lu comme une
     /// surface FreeSurfer.
     pub fn from_path(path: &Path) -> Self {
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(str::to_ascii_lowercase);
+        let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
         match ext.as_deref() {
             Some("gii") => MeshFormat::Gifti,
             Some("vtp") => MeshFormat::Vtp,

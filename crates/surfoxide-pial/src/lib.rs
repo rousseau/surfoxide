@@ -72,19 +72,10 @@ pub fn sulcal_skeleton(white: &Volume<bool>, cortex: &Volume<bool>, ratio: f64) 
 /// Résout Δu = 0 (surrelaxation rouge-noir, tailles de voxel prises en compte) sur `domain` privé de
 /// `white`, avec u = 0 sur `white` et u = 1 ailleurs. S'arrête quand la plus grande variation d'un balayage
 /// passe sous `tol`.
-pub fn solve_laplace(
-    white: &Volume<bool>,
-    domain: &Volume<bool>,
-    tol: f64,
-    max_iter: usize,
-) -> (Volume<f64>, usize) {
+pub fn solve_laplace(white: &Volume<bool>, domain: &Volume<bool>, tol: f64, max_iter: usize) -> (Volume<f64>, usize) {
     let dims = white.dims();
     let s = white.spacing();
-    let w = [
-        1.0 / (s[0] * s[0]),
-        1.0 / (s[1] * s[1]),
-        1.0 / (s[2] * s[2]),
-    ];
+    let w = [1.0 / (s[0] * s[0]), 1.0 / (s[1] * s[1]), 1.0 / (s[2] * s[2])];
     let wsum = 2.0 * (w[0] + w[1] + w[2]);
     let stride = [1usize, dims[0], dims[0] * dims[1]];
     let mut u: Vec<f64> = (0..white.len())
@@ -183,11 +174,7 @@ impl Field {
             let c = u.coords(idx);
             for (a, g) in grad.iter_mut().enumerate() {
                 let lo = if c[a] > 0 { idx - stride[a] } else { idx };
-                let hi = if c[a] + 1 < dims[a] {
-                    idx + stride[a]
-                } else {
-                    idx
-                };
+                let hi = if c[a] + 1 < dims[a] { idx + stride[a] } else { idx };
                 let span = ((hi - lo) / stride[a]) as f64;
                 g[idx] = if span > 0.0 {
                     (u.data()[hi] - u.data()[lo]) / span
@@ -200,12 +187,7 @@ impl Field {
         let inv = invert_affine(&a).expect("affine inversible");
         // ∇_monde = L^{-T} ∇_voxel, avec L^{-1} = partie linéaire de l'inverse.
         let to_world = std::array::from_fn(|r| std::array::from_fn(|c| inv[c][r]));
-        Field {
-            u,
-            grad,
-            inv,
-            to_world,
-        }
+        Field { u, grad, inv, to_world }
     }
 
     pub fn volume(&self) -> &Volume<f64> {
@@ -227,9 +209,7 @@ impl Field {
         for c in 0..8 {
             let o = [c & 1, (c >> 1) & 1, (c >> 2) & 1];
             let idx = (base[0] + o[0]).min(dims[0] - 1)
-                + dims[0]
-                    * ((base[1] + o[1]).min(dims[1] - 1)
-                        + dims[1] * (base[2] + o[2]).min(dims[2] - 1));
+                + dims[0] * ((base[1] + o[1]).min(dims[1] - 1) + dims[1] * (base[2] + o[2]).min(dims[2] - 1));
             let wgt = (0..3)
                 .map(|a| if o[a] == 1 { t[a] } else { 1.0 - t[a] })
                 .product::<f64>();
@@ -358,21 +338,12 @@ impl std::error::Error for PialError {}
 /// vers l'intérieur, sans créer d'intersection, ni avec elle-même, ni avec `pial` si elle est donnée.
 /// Fait de la place à la piale entre deux berges trop proches ; le déplacement reste de l'ordre de
 /// quelques centièmes de millimètre.
-pub fn shrink_white(
-    white: &mut TriMesh,
-    seeds: &[u32],
-    rings: usize,
-    depth: f64,
-    pial: Option<&TriMesh>,
-) -> usize {
+pub fn shrink_white(white: &mut TriMesh, seeds: &[u32], rings: usize, depth: f64, pial: Option<&TriMesh>) -> usize {
     let nb = surfoxide_core::adjacency::vertex_neighbors(white);
     let normals = surfoxide_core::adjacency::vertex_normals(white);
     let mut region: std::collections::HashSet<u32> = seeds.iter().copied().collect();
     for _ in 0..rings {
-        let more: Vec<u32> = region
-            .iter()
-            .flat_map(|&v| nb[v as usize].iter().copied())
-            .collect();
+        let more: Vec<u32> = region.iter().flat_map(|&v| nb[v as usize].iter().copied()).collect();
         region.extend(more);
     }
     let mut new = white.vertices().to_vec();
@@ -403,8 +374,7 @@ pub fn enforce_min_distance(white: &mut TriMesh, pial: &TriMesh, eps: f64, round
                     return None;
                 }
                 let t = f[g as usize];
-                let q =
-                    closest_point_triangle(p, v[t[0] as usize], v[t[1] as usize], v[t[2] as usize]);
+                let q = closest_point_triangle(p, v[t[0] as usize], v[t[1] as usize], v[t[2] as usize]);
                 Some((i as u32, q, eps - d2.sqrt()))
             })
             .collect::<Vec<_>>();
@@ -444,11 +414,7 @@ pub fn faces_near(surface: &TriMesh, points: &TriMesh, eps: f64) -> std::collect
 }
 
 /// Construit la piale à partir de la surface blanche `white` (fermée, sans auto-intersection) et du champ.
-pub fn pial_from_white(
-    white: &TriMesh,
-    field: &Field,
-    params: &PialParams,
-) -> Result<Pial, PialError> {
+pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> Result<Pial, PialError> {
     // Normales prises dans le cône des normales des faces incidentes : au droit d'un pli, un décalage le
     // long de la normale moyenne traverserait une face voisine, aussi petit soit-il.
     let vf = surfoxide_core::adjacency::vertex_faces(white);
@@ -488,16 +454,9 @@ pub fn pial_from_white(
     let mut attempt = 0;
     while !bad.is_empty() && attempt < HALVINGS {
         let mut region: std::collections::HashSet<u32> = bad.clone();
-        let rings = if attempt < HALVINGS {
-            1
-        } else {
-            attempt - HALVINGS + 1
-        };
+        let rings = if attempt < HALVINGS { 1 } else { attempt - HALVINGS + 1 };
         for _ in 0..rings {
-            let more: Vec<u32> = region
-                .iter()
-                .flat_map(|&v| ring[v as usize].iter().copied())
-                .collect();
+            let more: Vec<u32> = region.iter().flat_map(|&v| ring[v as usize].iter().copied()).collect();
             region.extend(more);
         }
         if attempt < HALVINGS {
@@ -513,9 +472,7 @@ pub fn pial_from_white(
                 let pos = pial.vertices().to_vec();
                 for &v in &region {
                     let n = &ring[v as usize];
-                    let mean = n
-                        .iter()
-                        .fold([0.0; 3], |acc, &w| vec3::add(acc, pos[w as usize]));
+                    let mean = n.iter().fold([0.0; 3], |acc, &w| vec3::add(acc, pos[w as usize]));
                     pial.vertices_mut()[v as usize] = vec3::scale(mean, 1.0 / n.len() as f64);
                 }
             }
@@ -523,10 +480,7 @@ pub fn pial_from_white(
         bad = conflicting_vertices(&pial, Some(white));
         attempt += 1;
         if debug {
-            eprintln!(
-                "décalage initial, essai {attempt} : {} sommets en conflit",
-                bad.len()
-            );
+            eprintln!("décalage initial, essai {attempt} : {} sommets en conflit", bad.len());
         }
     }
     if !bad.is_empty() && debug {
@@ -633,11 +587,7 @@ mod tests {
         let field = Field::new(u);
         for r in [5.8, 6.5, 7.2] {
             let got = field.value([r, 0.0, 0.0]);
-            assert!(
-                (got - exact(r)).abs() < 0.08,
-                "u({r}) = {got}, attendu {}",
-                exact(r)
-            );
+            assert!((got - exact(r)).abs() < 0.08, "u({r}) = {got}, attendu {}", exact(r));
         }
     }
 
@@ -655,17 +605,8 @@ mod tests {
         let cos = vec3::dot(vec3::normalize(end), vec3::normalize(p));
         assert!(cos > 0.995, "ligne de courant non radiale (cos = {cos})");
         let pial = pial_from_white(&white, &field, &params).unwrap();
-        let mean_r = pial
-            .mesh
-            .vertices()
-            .iter()
-            .map(|q| vec3::norm(*q))
-            .sum::<f64>()
-            / pial.mesh.n_vertices() as f64;
-        assert!(
-            (mean_r - 7.9).abs() < 0.3,
-            "rayon moyen de la piale {mean_r}"
-        );
+        let mean_r = pial.mesh.vertices().iter().map(|q| vec3::norm(*q)).sum::<f64>() / pial.mesh.n_vertices() as f64;
+        assert!((mean_r - 7.9).abs() < 0.3, "rayon moyen de la piale {mean_r}");
         assert_eq!(pial.held, 0);
         let pair = surfoxide_check::check_pair(&white, &pial.mesh, 0.05);
         assert!(pair.valid, "{pair:?}");
@@ -693,10 +634,7 @@ mod tests {
         }
         let sk = sulcal_skeleton(&white, &cortex, 1.5);
         // Fente : i de 13 à 16 ; milieu entre 14 et 15.
-        assert!(
-            sk.get(14, 4, 5) || sk.get(15, 4, 5),
-            "nappe médiane non détectée"
-        );
+        assert!(sk.get(14, 4, 5) || sk.get(15, 4, 5), "nappe médiane non détectée");
         assert!(!sk.get(13, 4, 5) && !sk.get(16, 4, 5), "nappe trop épaisse");
         assert!(!sk.get(6, 9, 5), "faux positif sur une couronne");
     }

@@ -78,15 +78,8 @@ fn read_scalar(r: &mut impl Read, t: &str, enc: Encoding) -> Result<f64> {
 /// Propriété d'un élément : scalaire (type) ou liste (type du compte, type des valeurs).
 #[derive(Debug, Clone)]
 enum Prop {
-    Scalar {
-        name: String,
-        ty: String,
-    },
-    List {
-        name: String,
-        count: String,
-        item: String,
-    },
+    Scalar { name: String, ty: String },
+    List { name: String, count: String, item: String },
 }
 
 #[derive(Debug, Clone)]
@@ -194,8 +187,7 @@ pub fn read_ply(path: impl AsRef<Path>) -> Result<TriMesh> {
             match e.name.as_str() {
                 "vertex" => vertices.push(p),
                 "face" => {
-                    let f = face
-                        .ok_or_else(|| IoError::Format("PLY : face sans vertex_indices".into()))?;
+                    let f = face.ok_or_else(|| IoError::Format("PLY : face sans vertex_indices".into()))?;
                     if f.len() != 3 {
                         return format_err(format!(
                             "{} : face à {} sommets (triangles attendus)",

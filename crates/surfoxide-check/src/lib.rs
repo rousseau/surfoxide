@@ -22,9 +22,7 @@ pub mod predicates;
 pub mod quality;
 
 use bvh::Bvh;
-use predicates::{
-    is_degenerate, shared_edge_overlap, shared_vertex_intersect, triangles_intersect,
-};
+use predicates::{is_degenerate, shared_edge_overlap, shared_vertex_intersect, triangles_intersect};
 
 fn tri(mesh: &TriMesh, f: u32) -> [Vec3; 3] {
     let v = mesh.vertices();
@@ -155,10 +153,7 @@ pub fn check_surface(mesh: &TriMesh) -> SurfaceReport {
         .count();
     let self_intersections = self_intersections(mesh).len();
     let signed_volume = mesh.signed_volume();
-    let valid = t.is_sphere_like()
-        && signed_volume > 0.0
-        && self_intersections == 0
-        && degenerate_faces == 0;
+    let valid = t.is_sphere_like() && signed_volume > 0.0 && self_intersections == 0 && degenerate_faces == 0;
     SurfaceReport {
         n_vertices: t.n_vertices,
         n_faces: t.n_faces,
@@ -253,10 +248,7 @@ mod tests {
         let r = check_pair(&inner, &outer, 1.0);
         assert!(r.valid, "{r:?}");
         // Les sommets intérieurs sont à 2 mm de la sphère extérieure (aux facettes près).
-        assert!(
-            r.min_distance > 1.9 && r.min_distance <= 2.0 + 1e-9,
-            "{r:?}"
-        );
+        assert!(r.min_distance > 1.9 && r.min_distance <= 2.0 + 1e-9, "{r:?}");
         // Inversées : l'intérieure n'est pas dans l'extérieure.
         assert!(!check_pair(&outer, &inner, 1.0).valid);
         // Trop proches pour l'épaisseur exigée.

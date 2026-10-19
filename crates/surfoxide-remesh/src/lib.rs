@@ -77,16 +77,9 @@ fn collapse_short(m: &mut HalfEdgeMesh, low: f64, high: f64) {
                     continue; // faces supprimées
                 }
                 let before = m.face_normal(f);
-                let q = t.map(|w| {
-                    if w == a || w == b {
-                        p
-                    } else {
-                        m.pos[w as usize]
-                    }
-                });
+                let q = t.map(|w| if w == a || w == b { p } else { m.pos[w as usize] });
                 let after = vec3::triangle_normal(q[0], q[1], q[2]);
-                if vec3::dot(before, after) <= 0.1 * vec3::norm(before) * vec3::norm(after)
-                    || vec3::norm(after) < 1e-12
+                if vec3::dot(before, after) <= 0.1 * vec3::norm(before) * vec3::norm(after) || vec3::norm(after) < 1e-12
                 {
                     ok = false;
                 }
@@ -118,10 +111,7 @@ fn flip_edges(m: &mut HalfEdgeMesh, min_cos: f64) {
             continue;
         }
         // Seulement entre faces presque coplanaires, et sans retourner les nouvelles faces.
-        let (n1, n2) = (
-            m.face_normal((h / 3) as usize),
-            m.face_normal((g / 3) as usize),
-        );
+        let (n1, n2) = (m.face_normal((h / 3) as usize), m.face_normal((g / 3) as usize));
         let cos = vec3::dot(vec3::normalize(n1), vec3::normalize(n2));
         if cos < min_cos {
             continue;
@@ -145,9 +135,7 @@ fn tangential_relaxation(m: &mut HalfEdgeMesh) {
         .iter()
         .map(|&v| {
             let nb = m.neighbors(v);
-            let c = nb
-                .iter()
-                .fold([0.0; 3], |acc, &w| vec3::add(acc, m.pos[w as usize]));
+            let c = nb.iter().fold([0.0; 3], |acc, &w| vec3::add(acc, m.pos[w as usize]));
             let c = vec3::scale(c, 1.0 / nb.len() as f64);
             let n = vec3::normalize(m.vertex_normal(v));
             let d = vec3::sub(c, m.pos[v as usize]);
@@ -170,8 +158,7 @@ fn project(m: &mut HalfEdgeMesh, reference: &TriMesh, bvh: &Bvh, ref_normals: &[
         let p = m.pos[v as usize];
         let Some((f, _)) = bvh.nearest(p, |f| {
             let t = rf[f as usize];
-            let q =
-                closest_point_triangle(p, rv[t[0] as usize], rv[t[1] as usize], rv[t[2] as usize]);
+            let q = closest_point_triangle(p, rv[t[0] as usize], rv[t[1] as usize], rv[t[2] as usize]);
             let d = vec3::sub(p, q);
             vec3::dot(d, d)
         }) else {
@@ -182,8 +169,7 @@ fn project(m: &mut HalfEdgeMesh, reference: &TriMesh, bvh: &Bvh, ref_normals: &[
             continue;
         }
         let t = rf[f as usize];
-        m.pos[v as usize] =
-            closest_point_triangle(p, rv[t[0] as usize], rv[t[1] as usize], rv[t[2] as usize]);
+        m.pos[v as usize] = closest_point_triangle(p, rv[t[0] as usize], rv[t[1] as usize], rv[t[2] as usize]);
     }
 }
 
@@ -201,11 +187,7 @@ fn dihedral_cos(m: &HalfEdgeMesh, h: u32) -> f64 {
 /// fusionnée en son milieu, sous la link condition (topologie conservée) et sans créer de face d'aire
 /// nulle ; contrairement au remaillage, une face peut changer d'orientation, puisque c'est le pli qu'on
 /// défait. Rend la surface et le nombre de plis restants. Peut créer des intersections, à réparer ensuite.
-pub fn unfold(
-    mesh: &TriMesh,
-    max_cos: f64,
-    passes: usize,
-) -> Result<(TriMesh, usize), NotClosedManifold> {
+pub fn unfold(mesh: &TriMesh, max_cos: f64, passes: usize) -> Result<(TriMesh, usize), NotClosedManifold> {
     let mut m = HalfEdgeMesh::from_mesh(mesh)?;
     let folded = |m: &HalfEdgeMesh| -> Vec<u32> {
         m.edges()
@@ -238,13 +220,7 @@ pub fn unfold(
                         if t.contains(&a) && t.contains(&b) {
                             return false;
                         }
-                        let q = t.map(|w| {
-                            if w == a || w == b {
-                                p
-                            } else {
-                                m.pos[w as usize]
-                            }
-                        });
+                        let q = t.map(|w| if w == a || w == b { p } else { m.pos[w as usize] });
                         vec3::norm(vec3::triangle_normal(q[0], q[1], q[2])) < 1e-10
                     })
                 });
@@ -300,10 +276,7 @@ mod tests {
             .map(|&[a, b]| vec3::dist(v[a as usize], v[b as usize]))
             .collect();
         let mean = l.iter().sum::<f64>() / l.len() as f64;
-        let in_band = l
-            .iter()
-            .filter(|&&x| x > 0.5 * mean && x < 1.5 * mean)
-            .count();
+        let in_band = l.iter().filter(|&&x| x > 0.5 * mean && x < 1.5 * mean).count();
         (mean, in_band as f64 / l.len() as f64)
     }
 

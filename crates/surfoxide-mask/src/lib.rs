@@ -131,9 +131,7 @@ impl FromStr for LabelTable {
         match s.to_ascii_lowercase().as_str() {
             "bounti19" | "bounti" => Ok(Self::bounti19()),
             "multibounti43" | "multibounti" | "multi-bounti" => Ok(Self::multibounti43()),
-            _ => Err(format!(
-                "table de labels inconnue « {s} » (bounti19 ou multibounti43)"
-            )),
+            _ => Err(format!("table de labels inconnue « {s} » (bounti19 ou multibounti43)")),
         }
     }
 }
@@ -212,17 +210,10 @@ pub fn white_mask(labels: &Volume<i32>, table: &LabelTable, hemi: Hemisphere) ->
 }
 
 /// Masque blanc fermé (comme [`white_mask`]) et masque du cortex d'un hémisphère.
-pub fn hemisphere_masks(
-    labels: &Volume<i32>,
-    table: &LabelTable,
-    hemi: Hemisphere,
-) -> (Volume<bool>, Volume<bool>) {
+pub fn hemisphere_masks(labels: &Volume<i32>, table: &LabelTable, hemi: Hemisphere) -> (Volume<bool>, Volume<bool>) {
     let sides = assign_sides(labels, table);
     let raw = tissue_mask(labels, &sides, table, Tissue::White, hemi);
-    let white = fill_cavities(
-        &largest_component(&raw, Connectivity::TwentySix),
-        Connectivity::Six,
-    );
+    let white = fill_cavities(&largest_component(&raw, Connectivity::TwentySix), Connectivity::Six);
     let cortex = tissue_mask(labels, &sides, table, Tissue::CorticalGm, hemi);
     (white, cortex)
 }
@@ -246,8 +237,7 @@ pub fn cortical_vertices(
             let Some(q) = cortex.world_to_voxel(p) else {
                 return false;
             };
-            let idx: [usize; 3] =
-                std::array::from_fn(|a| (q[a].round().max(0.0) as usize).min(dims[a] - 1));
+            let idx: [usize; 3] = std::array::from_fn(|a| (q[a].round().max(0.0) as usize).min(dims[a] - 1));
             d2.get(idx[0], idx[1], idx[2]) <= max_dist * max_dist
         })
         .collect();
@@ -376,11 +366,6 @@ mod tests {
         };
         assert!(centroid_x(&l) < centroid_x(&r));
         let vol = |m: &Volume<bool>| m.data().iter().filter(|&&b| b).count() as f64 * 0.125;
-        assert!(
-            vol(&l) > 10_000.0 && vol(&r) > 10_000.0,
-            "{} {}",
-            vol(&l),
-            vol(&r)
-        );
+        assert!(vol(&l) > 10_000.0 && vol(&r) > 10_000.0, "{} {}", vol(&l), vol(&r));
     }
 }

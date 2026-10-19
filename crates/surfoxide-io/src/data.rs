@@ -7,8 +7,7 @@ use std::path::PathBuf;
 pub fn data_dir() -> PathBuf {
     match std::env::var_os("SURFOXIDE_DATA") {
         Some(d) => PathBuf::from(d),
-        None => PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-            .join(".cache/surfoxide/data"),
+        None => PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".cache/surfoxide/data"),
     }
 }
 

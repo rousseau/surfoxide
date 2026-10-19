@@ -30,8 +30,7 @@ impl HalfEdgeMesh {
         let faces = mesh.faces().to_vec();
         let n = faces.len() * 3;
         let mut twin = vec![NONE; n];
-        let mut map: std::collections::HashMap<(u32, u32), u32> =
-            std::collections::HashMap::with_capacity(n);
+        let mut map: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::with_capacity(n);
         for (f, t) in faces.iter().enumerate() {
             for k in 0..3 {
                 let h = (3 * f + k) as u32;
@@ -145,16 +144,13 @@ impl HalfEdgeMesh {
 
     /// Normale (non normalisée, pondérée par l'aire) au sommet `v`.
     pub fn vertex_normal(&self, v: u32) -> Vec3 {
-        self.outgoing(v).into_iter().fold([0.0; 3], |acc, h| {
-            vec3::add(acc, self.face_normal((h / 3) as usize))
-        })
+        self.outgoing(v)
+            .into_iter()
+            .fold([0.0; 3], |acc, h| vec3::add(acc, self.face_normal((h / 3) as usize)))
     }
 
     pub fn edge_length(&self, h: u32) -> f64 {
-        vec3::dist(
-            self.pos[self.from(h) as usize],
-            self.pos[self.to(h) as usize],
-        )
+        vec3::dist(self.pos[self.from(h) as usize], self.pos[self.to(h) as usize])
     }
 
     /// Réécrit les faces `group` (déjà modifiées, sauf celles listées dans `killed`) et recâble les
@@ -265,11 +261,7 @@ impl HalfEdgeMesh {
         let g = self.twin(h);
         let (f1, f2) = ((h / 3) as usize, (g / 3) as usize);
         let (a, b) = (self.from(h), self.to(h));
-        let group: Vec<usize> = self
-            .outgoing(a)
-            .into_iter()
-            .map(|e| (e / 3) as usize)
-            .collect();
+        let group: Vec<usize> = self.outgoing(a).into_iter().map(|e| (e / 3) as usize).collect();
         let ext = self.externals(&group);
         self.face_alive[f1] = false;
         self.face_alive[f2] = false;
@@ -284,11 +276,7 @@ impl HalfEdgeMesh {
         self.pos[b as usize] = p;
         // Les arêtes extérieures de f1 (b–c) et de f2 (d–b) sont reprises, avec la même clé, par les faces
         // voisines où a vient d'être renommé en b : le recâblage les retrouve par (départ, arrivée).
-        let live: Vec<usize> = group
-            .iter()
-            .copied()
-            .filter(|&f| self.face_alive[f])
-            .collect();
+        let live: Vec<usize> = group.iter().copied().filter(|&f| self.face_alive[f]).collect();
         self.relink(&live, &ext);
         for &f in &live {
             for &v in &self.faces[f] {

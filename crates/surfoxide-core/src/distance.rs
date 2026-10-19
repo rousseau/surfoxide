@@ -25,8 +25,7 @@ fn edt_1d(f: &[f64], s: f64, out: &mut [f64], arg: &mut [usize], v: &mut [usize]
         loop {
             let p = v[k];
             // Abscisse de l'intersection des paraboles issues de q et de p.
-            let sx = ((f[q] + s2 * (q * q) as f64) - (f[p] + s2 * (p * p) as f64))
-                / (2.0 * s2 * (q as f64 - p as f64));
+            let sx = ((f[q] + s2 * (q * q) as f64) - (f[p] + s2 * (p * p) as f64)) / (2.0 * s2 * (q as f64 - p as f64));
             if sx <= z[k] {
                 if k == 0 {
                     v[0] = q;
@@ -88,14 +87,7 @@ pub fn feature_transform(mask: &Volume<bool>) -> (Volume<f64>, Volume<u32>) {
                     f[q] = d[base + q * stride[axis]];
                     line_feat[q] = feat[base + q * stride[axis]];
                 }
-                edt_1d(
-                    &f[..n],
-                    spacing[axis],
-                    &mut out[..n],
-                    &mut arg[..n],
-                    &mut v,
-                    &mut z,
-                );
+                edt_1d(&f[..n], spacing[axis], &mut out[..n], &mut arg[..n], &mut v, &mut z);
                 for q in 0..n {
                     d[base + q * stride[axis]] = out[q];
                     feat[base + q * stride[axis]] = line_feat[arg[q]];

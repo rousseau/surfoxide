@@ -75,8 +75,8 @@ fn boundary_faces(mask: &Volume<bool>) -> (TriMesh, Vec<Vec3>) {
             for s in [-1isize, 1] {
                 let mut n = c.map(|x| x as isize);
                 n[a] += s;
-                let outside = !mask.contains(n[0], n[1], n[2])
-                    || !mask.get(n[0] as usize, n[1] as usize, n[2] as usize);
+                let outside =
+                    !mask.contains(n[0], n[1], n[2]) || !mask.get(n[0] as usize, n[1] as usize, n[2] as usize);
                 if !outside {
                     continue;
                 }
@@ -96,10 +96,7 @@ fn boundary_faces(mask: &Volume<bool>) -> (TriMesh, Vec<Vec3>) {
             }
         }
     }
-    (
-        TriMesh::new(vertices, faces).expect("indices valides"),
-        centers,
-    )
+    (TriMesh::new(vertices, faces).expect("indices valides"), centers)
 }
 
 /// Distance de chaque point de `points` à la surface `mesh`.
@@ -142,10 +139,8 @@ pub fn run(
     boundary: Boundary,
     json: Option<&Path>,
 ) -> Result<(), String> {
-    let mesh =
-        surfoxide_io::read_mesh(surface).map_err(|e| format!("{}: {e}", surface.display()))?;
-    let (labels, _) =
-        surfoxide_io::nifti::read_labels(seg).map_err(|e| format!("{}: {e}", seg.display()))?;
+    let mesh = surfoxide_io::read_mesh(surface).map_err(|e| format!("{}: {e}", surface.display()))?;
+    let (labels, _) = surfoxide_io::nifti::read_labels(seg).map_err(|e| format!("{}: {e}", seg.display()))?;
     let (white, cortex) = surfoxide_mask::hemisphere_masks(&labels, table, hemi);
     let mask = match boundary {
         Boundary::White => white,
@@ -167,14 +162,7 @@ pub fn run(
                     .collect(),
             )
         }
-        Boundary::Pial => white.with_data(
-            white
-                .data()
-                .iter()
-                .zip(cortex.data())
-                .map(|(&a, &b)| a || b)
-                .collect(),
-        ),
+        Boundary::Pial => white.with_data(white.data().iter().zip(cortex.data()).map(|(&a, &b)| a || b).collect()),
     };
     let report = evaluate(&mesh, &mask);
     let text = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;

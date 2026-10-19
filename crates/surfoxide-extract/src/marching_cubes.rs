@@ -185,9 +185,7 @@ fn close_disk(l: &[u32], pos: &mut Vec<Vec3>, out: &mut Vec<[u32; 3]>) {
         }
         n => {
             // Éventail autour du barycentre : évite les triangles qui se recouvrent sur les boucles longues.
-            let c = l
-                .iter()
-                .fold([0.0; 3], |acc, &i| vec3::add(acc, pos[i as usize]));
+            let c = l.iter().fold([0.0; 3], |acc, &i| vec3::add(acc, pos[i as usize]));
             pos.push(vec3::scale(c, 1.0 / n as f64));
             let ci = (pos.len() - 1) as u32;
             for k in 0..n {
@@ -408,8 +406,7 @@ mod tests {
         for k in 0..n {
             for j in 0..n {
                 for i in 0..n {
-                    let d2 =
-                        (i as f64 - c).powi(2) + (j as f64 - c).powi(2) + (k as f64 - c).powi(2);
+                    let d2 = (i as f64 - c).powi(2) + (j as f64 - c).powi(2) + (k as f64 - c).powi(2);
                     v.set(i, j, k, d2 < r * r);
                 }
             }
@@ -427,10 +424,7 @@ mod tests {
         let v = m.signed_volume();
         let exact = 4.0 / 3.0 * std::f64::consts::PI * r.powi(3);
         assert!(v > 0.0, "normales rentrantes");
-        assert!(
-            (v - exact).abs() / exact < 0.03,
-            "volume {v} contre {exact}"
-        );
+        assert!((v - exact).abs() / exact < 0.03, "volume {v} contre {exact}");
     }
 
     #[test]
@@ -469,10 +463,7 @@ mod tests {
             let m = marching_cubes(&c.levelset, 0.0);
             let rep = topology_report(&m);
             assert!(rep.is_sphere_like(), "essai {trial} : {rep:?}");
-            assert!(
-                m.signed_volume() > 0.0,
-                "essai {trial} : normales rentrantes"
-            );
+            assert!(m.signed_volume() > 0.0, "essai {trial} : normales rentrantes");
         }
     }
 
@@ -531,10 +522,7 @@ mod tests {
             let c = correct_topology(&v, strategy, 0.5).unwrap();
             let m = marching_cubes(&c.levelset, 0.0);
             let rep = topology_report(&m);
-            assert!(
-                rep.is_sphere_like(),
-                "essai {trial} ({strategy:?}) : {rep:?}"
-            );
+            assert!(rep.is_sphere_like(), "essai {trial} ({strategy:?}) : {rep:?}");
         }
     }
 
@@ -573,13 +561,7 @@ mod tests {
             }
             let chi_obj: i64 = cells
                 .iter()
-                .map(|&(x, y, z)| {
-                    if (x % 2 + y % 2 + z % 2) % 2 == 0 {
-                        1
-                    } else {
-                        -1
-                    }
-                })
+                .map(|&(x, y, z)| if (x % 2 + y % 2 + z % 2) % 2 == 0 { 1 } else { -1 })
                 .sum();
             assert_eq!(rep.euler_characteristic, 2 * chi_obj, "essai {trial}");
         }
