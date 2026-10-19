@@ -1,6 +1,6 @@
 name: CI
 
-# Compilation, format, lints et tests sur CPU (backend flex). Le GPU se teste sur la machine WSL.
+# Compilation, format, lints et tests sur CPU (backend flex), Linux et macOS. Le GPU se teste sur la machine WSL.
 
 on:
   push:
@@ -12,10 +12,14 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
