@@ -381,15 +381,12 @@ mod tests {
 
     /// Masque blanc réel : correction en quelques secondes, faible fraction de voxels modifiés.
     #[test]
-    #[ignore = "données locales : ~/Exp/CRL-Cinema/data/raw/bounti"]
+    #[ignore = "données réelles : bash scripts/fetch-data.sh"]
     fn masque_reel() {
         use surfoxide_core::filter::{crop_to, gaussian_blur};
-        let home = std::env::var("HOME").unwrap();
         for sub in ["sub-0dfxc/ses-01", "sub-0avbc/ses-02"] {
-            let name = sub.replace('/', "_");
-            let p = format!(
-                "{home}/Exp/CRL-Cinema/data/raw/bounti/{sub}/anat/{name}_res-0p5mm_desc-bounti19_dseg.nii.gz"
-            );
+            let (s, e) = sub.split_once('/').unwrap();
+            let p = surfoxide_io::data::segmentation(s, e, "bounti19");
             let (labels, _) = surfoxide_io::nifti::read_labels(p).unwrap();
             let table = surfoxide_mask::LabelTable::bounti19();
             for hemi in surfoxide_core::Hemisphere::BOTH {

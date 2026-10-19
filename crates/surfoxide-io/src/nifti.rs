@@ -237,12 +237,9 @@ mod tests {
 
     /// Lecture d'une vraie segmentation BOUNTI : dimensions, labels attendus, affine non triviale.
     #[test]
-    #[ignore = "données locales : ~/Exp/CRL-Cinema/data/raw/bounti"]
+    #[ignore = "données réelles : bash scripts/fetch-data.sh"]
     fn lecture_bounti_reelle() {
-        let home = std::env::var("HOME").unwrap();
-        let p = format!(
-            "{home}/Exp/CRL-Cinema/data/raw/bounti/sub-z7uv9/ses-01/anat/sub-z7uv9_ses-01_res-0p5mm_desc-bounti19_dseg.nii.gz"
-        );
+        let p = crate::data::segmentation("sub-z7uv9", "ses-01", "bounti19");
         let (v, _) = read_labels(p).unwrap();
         let max = *v.data().iter().max().unwrap();
         assert!((17..=19).contains(&max), "label maximal {max}");

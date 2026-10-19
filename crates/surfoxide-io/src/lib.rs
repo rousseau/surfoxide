@@ -7,6 +7,8 @@
 //! - [`ply`], [`stl`] : formats d'échange généraux.
 //! - [`freesurfer`] : surfaces et fichiers « curv » de FreeSurfer.
 //!
+//! - [`data`] : emplacement des données réelles rapatriées (`scripts/fetch-data.sh`).
+//!
 //! [`read_mesh`] et [`write_mesh`] choisissent le format d'après l'extension.
 
 use std::fmt;
@@ -14,6 +16,7 @@ use std::path::Path;
 
 use surfoxide_core::TriMesh;
 
+pub mod data;
 pub mod freesurfer;
 pub mod gifti;
 pub mod nifti;

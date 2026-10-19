@@ -56,7 +56,8 @@ crates/
   surfx/            binaire CLI : une sous-commande par module
 scripts/
   setup-linux.sh    préparation d'une machine Ubuntu avec GPU NVIDIA
-  validate.py       validation sur la cohorte locale et comparaison à fetpype
+  fetch-data.sh     rapatrie les segmentations (et T2w) depuis Garage dans $SURFOXIDE_DATA
+  validate.py       validation sur la cohorte et comparaison à fetpype
   illustrate.py     figure T2w, segmentation et surfaces pour quelques âges (numpy, nibabel, matplotlib)
   plate.py          planche de toutes les surfaces d'un dossier, de la plus jeune à la plus âgée
   setup-wsl.sh      préparation d'une machine WSL avec GPU NVIDIA

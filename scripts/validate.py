@@ -6,6 +6,9 @@ Pour une session par semaine d'âge gestationnel (BOUNTI-19) : `surfx run` (WM e
 cortex pour la piale). fetpype (image docker macatools/surf_proc:v0.0.1e) est lancé sur les mêmes
 sessions et évalué de la même façon. Quelques sessions multi-BOUNTI-43 complètent.
 
+Données : `bash scripts/fetch-data.sh` (segmentations dans $SURFOXIDE_DATA, par défaut
+~/.cache/surfoxide/data).
+
 Usage :
     python3 scripts/validate.py --out ~/scratch/surfoxide-validation [--jobs 6] [--no-fetpype]
         [--reuse-fetpype ancien/results.json]
@@ -24,8 +27,8 @@ import time
 from pathlib import Path
 
 HOME = Path.home()
-BOUNTI = HOME / "Exp/CRL-Cinema/data/raw/bounti"
-MULTI = HOME / "Exp/fetal-folding-geometry/.scratch/derivatives/fetal-folding-geometry"
+# Segmentations rapatriées par scripts/fetch-data.sh.
+DATA = Path(os.environ.get("SURFOXIDE_DATA", HOME / ".cache/surfoxide/data"))
 SUBJECTS = HOME / "Exp/fetal-folding-geometry/data/subjects.csv"
 FETPYPE_IMAGE = "macatools/surf_proc:v0.0.1e"
 FETPYPE_LABELS = {"L": "5,7,14,16", "R": "6,8,15,17"}
@@ -35,9 +38,7 @@ SURFX = REPO / "target/release/surfx"
 
 
 def seg_path(sub, ses, kind):
-    if kind == "bounti19":
-        return BOUNTI / sub / ses / "anat" / f"{sub}_{ses}_res-0p5mm_desc-bounti19_dseg.nii.gz"
-    return MULTI / sub / ses / "anat" / f"{sub}_{ses}_res-0p5mm_desc-multibounti43_dseg.nii.gz"
+    return DATA / sub / ses / "anat" / f"{sub}_{ses}_res-0p5mm_desc-{kind}_dseg.nii.gz"
 
 
 def select_sessions():

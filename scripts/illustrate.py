@@ -13,13 +13,14 @@ Usage :
         --out figure.png sub-d6a1p/ses-01 sub-0fk6m/ses-01 sub-0avbc/ses-02
 
 <dérivées> contient <sub>/<ses>/anat/ avec la T2w rééchantillonnée à 0,5 mm et la segmentation
-BOUNTI-19 sur la même grille (garage:crl2025/derivatives/fetal-folding-geometry, à rapatrier).
+BOUNTI-19 sur la même grille : `bash scripts/fetch-data.sh --t2w sub-XX/ses-YY ...`.
 
 Dépendances : numpy, nibabel, matplotlib.
 """
 
 import argparse
 import csv
+import os
 from pathlib import Path
 
 import matplotlib
@@ -183,7 +184,9 @@ def plane_segments(vertices, faces, y0):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("sessions", nargs="+", help="sub-XX/ses-YY")
-    ap.add_argument("--data", type=Path, required=True, help="dossier <sub>/<ses>/anat/ (T2w, BOUNTI)")
+    ap.add_argument("--data", type=Path,
+                    default=Path(os.environ.get("SURFOXIDE_DATA", HOME / ".cache/surfoxide/data")),
+                    help="dossier <sub>/<ses>/anat/ (T2w, BOUNTI) ; défaut : $SURFOXIDE_DATA")
     ap.add_argument("--surfaces", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--slice", type=float, default=0.45,

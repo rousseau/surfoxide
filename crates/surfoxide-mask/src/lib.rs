@@ -288,12 +288,9 @@ mod tests {
 
     /// Sur une vraie segmentation : masques gauche et droit disjoints, d'un seul tenant, du bon côté.
     #[test]
-    #[ignore = "données locales : ~/Exp/CRL-Cinema/data/raw/bounti"]
+    #[ignore = "données réelles : bash scripts/fetch-data.sh"]
     fn masques_reels() {
-        let home = std::env::var("HOME").unwrap();
-        let p = format!(
-            "{home}/Exp/CRL-Cinema/data/raw/bounti/sub-0dfxc/ses-01/anat/sub-0dfxc_ses-01_res-0p5mm_desc-bounti19_dseg.nii.gz"
-        );
+        let p = surfoxide_io::data::segmentation("sub-0dfxc", "ses-01", "bounti19");
         let (labels, _) = surfoxide_io::nifti::read_labels(p).unwrap();
         let table = LabelTable::bounti19();
         let l = white_mask(&labels, &table, Hemisphere::Left);
