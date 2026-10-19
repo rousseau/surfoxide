@@ -54,15 +54,11 @@ fn device_for(backend: BackendArg) -> Result<Device, String> {
         #[cfg(feature = "cuda")]
         BackendArg::Cuda => Ok(Device::cuda(0)),
         #[cfg(not(feature = "cuda"))]
-        BackendArg::Cuda => Err(
-            "surfx compilé sans CUDA : relancer avec `cargo run --release --features cuda`".into(),
-        ),
+        BackendArg::Cuda => Err("surfx compilé sans CUDA : relancer avec `cargo run --release --features cuda`".into()),
         #[cfg(feature = "wgpu")]
         BackendArg::Wgpu => Ok(Device::wgpu(burn::tensor::DeviceKind::DefaultDevice)),
         #[cfg(not(feature = "wgpu"))]
-        BackendArg::Wgpu => Err(
-            "surfx compilé sans wgpu : relancer avec `cargo run --release --features wgpu`".into(),
-        ),
+        BackendArg::Wgpu => Err("surfx compilé sans wgpu : relancer avec `cargo run --release --features wgpu`".into()),
     }
 }
 
@@ -83,9 +79,7 @@ fn timed_matmul(a: &[f32], b: &[f32], n: usize, device: &Device) -> (Vec<f32>, f
 fn run_device(backend: BackendArg, n: usize) -> Result<(), String> {
     let device = device_for(backend)?;
     // Matrices déterministes, sans dépendance à un générateur aléatoire.
-    let a: Vec<f32> = (0..n * n)
-        .map(|i| ((i * 7919) % 1000) as f32 / 1000.0 - 0.5)
-        .collect();
+    let a: Vec<f32> = (0..n * n).map(|i| ((i * 7919) % 1000) as f32 / 1000.0 - 0.5).collect();
     let b: Vec<f32> = (0..n * n)
         .map(|i| ((i * 104729) % 1000) as f32 / 1000.0 - 0.5)
         .collect();
@@ -93,10 +87,7 @@ fn run_device(backend: BackendArg, n: usize) -> Result<(), String> {
     println!("device : {device:?}");
     let (c, secs) = timed_matmul(&a, &b, n, &device);
     let gflops = 2.0 * (n as f64).powi(3) / secs / 1e9;
-    println!(
-        "produit {n}×{n} : {:.1} ms ({gflops:.1} GFLOP/s)",
-        secs * 1e3
-    );
+    println!("produit {n}×{n} : {:.1} ms ({gflops:.1} GFLOP/s)", secs * 1e3);
 
     if !matches!(backend, BackendArg::Cpu) {
         let (reference, _) = timed_matmul(&a, &b, n, &Device::flex());

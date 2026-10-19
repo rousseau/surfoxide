@@ -38,10 +38,7 @@ impl TopologyReport {
     ///
     /// La variété aux sommets (pas de « sablier » en un sommet) n'est pas encore vérifiée.
     pub fn genus(&self) -> Option<i64> {
-        if self.is_closed_oriented_manifold()
-            && self.components == 1
-            && (2 - self.euler_characteristic) % 2 == 0
-        {
+        if self.is_closed_oriented_manifold() && self.components == 1 && (2 - self.euler_characteristic) % 2 == 0 {
             Some((2 - self.euler_characteristic) / 2)
         } else {
             None
@@ -150,11 +147,7 @@ mod tests {
 
     #[test]
     fn surface_ouverte_detectee() {
-        let mesh = TriMesh::new(
-            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-            vec![[0, 1, 2]],
-        )
-        .unwrap();
+        let mesh = TriMesh::new(vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], vec![[0, 1, 2]]).unwrap();
         let r = topology_report(&mesh);
         assert_eq!(r.boundary_edges, 3);
         assert_eq!(r.genus(), None);
