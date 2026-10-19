@@ -354,6 +354,71 @@ impl std::fmt::Display for PialError {
 
 impl std::error::Error for PialError {}
 
+/// Recule les sommets `seeds` de la surface blanche (et leurs `rings` premiers anneaux) de `depth` mm
+/// vers l'intérieur, sans créer d'intersection, ni avec elle-même, ni avec `pial` si elle est donnée.
+/// Fait de la place à la piale entre deux berges trop proches ; le déplacement reste de l'ordre de
+/// quelques centièmes de millimètre.
+pub fn shrink_white(
+    white: &mut TriMesh,
+    seeds: &[u32],
+    rings: usize,
+    depth: f64,
+    pial: Option<&TriMesh>,
+) -> usize {
+    let nb = surfoxide_core::adjacency::vertex_neighbors(white);
+    let normals = surfoxide_core::adjacency::vertex_normals(white);
+    let mut region: std::collections::HashSet<u32> = seeds.iter().copied().collect();
+    for _ in 0..rings {
+        let more: Vec<u32> = region
+            .iter()
+            .flat_map(|&v| nb[v as usize].iter().copied())
+            .collect();
+        region.extend(more);
+    }
+    let mut new = white.vertices().to_vec();
+    for &v in &region {
+        new[v as usize] = vec3::sub(new[v as usize], vec3::scale(normals[v as usize], depth));
+    }
+    safe_update_with(white, &new, |m| conflicting_vertices(m, pial))
+}
+
+/// Garantit, autant que possible, une distance d'au moins `eps` entre chaque sommet blanc et la piale, en
+/// reculant les sommets blancs trop proches (au plus `rounds` passes). Rend le nombre de sommets blancs
+/// encore trop proches.
+pub fn enforce_min_distance(white: &mut TriMesh, pial: &TriMesh, eps: f64, rounds: usize) -> usize {
+    let mut close = Vec::new();
+    for _ in 0..=rounds {
+        let bvh = Bvh::new(pial);
+        let (v, f) = (pial.vertices(), pial.faces());
+        close = white
+            .vertices()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &p)| {
+                let (_, d2) = bvh.nearest(p, |g| {
+                    let t = f[g as usize];
+                    distance2_triangle(p, v[t[0] as usize], v[t[1] as usize], v[t[2] as usize])
+                })?;
+                (d2 < eps * eps).then(|| (i as u32, eps - d2.sqrt()))
+            })
+            .collect::<Vec<_>>();
+        if close.is_empty() {
+            return 0;
+        }
+        // Recul de l'écart manquant, plus une petite marge, sommet par sommet.
+        let normals = surfoxide_core::adjacency::vertex_normals(white);
+        let mut new = white.vertices().to_vec();
+        for &(i, missing) in &close {
+            new[i as usize] = vec3::sub(
+                new[i as usize],
+                vec3::scale(normals[i as usize], missing + 0.2 * eps),
+            );
+        }
+        safe_update_with(white, &new, |m| conflicting_vertices(m, Some(pial)));
+    }
+    close.len()
+}
+
 /// Sommets des faces de `surface` situées à moins de `eps` d'un sommet de `points`.
 pub fn faces_near(surface: &TriMesh, points: &TriMesh, eps: f64) -> std::collections::HashSet<u32> {
     let bvh = Bvh::new(surface);

@@ -101,6 +101,7 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     let c =
         correct_topology(&phi, Strategy::Best, 0.05 * min_spacing).map_err(|e| e.to_string())?;
     let mut mesh = surfoxide_extract::marching_cubes(&c.levelset, 0.02);
+    debug_topology("marching cubes", &mesh);
     // Lissage pas à pas : un pas qui ferait se couper la surface est annulé localement.
     let mut held = 0;
     for _ in 0..params.taubin {
@@ -108,14 +109,19 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
         surfoxide_extract::taubin(&mut trial, 1, params.lambda, -1.06 * params.lambda);
         held += surfoxide_repair::safe_update(&mut mesh, trial.vertices());
     }
+    debug_topology("Taubin", &mesh);
     let smoothed = mesh.clone();
+    let mut remesh_failed = false;
     if params.edge > 0.0 {
-        mesh = surfoxide_remesh::remesh(&mesh, &surfoxide_remesh::RemeshParams::new(params.edge))
-            .map_err(|_| "remaillage : surface non variété".to_string())?;
+        match surfoxide_remesh::remesh(&mesh, &surfoxide_remesh::RemeshParams::new(params.edge)) {
+            Ok(m) => mesh = m,
+            Err(_) => remesh_failed = true,
+        }
     }
     let mut repair = surfoxide_repair::repair_intersections(&mut mesh, 30);
-    // Le contrat d'abord : si la réparation échoue, on garde la surface lissée (saine) non remaillée.
-    let remesh_dropped = repair.remaining > 0;
+    // Le contrat d'abord : si le remaillage ou la réparation échoue, on garde la surface lissée (saine)
+    // non remaillée.
+    let remesh_dropped = remesh_failed || repair.remaining > 0;
     if remesh_dropped {
         mesh = smoothed;
         repair.remaining = 0;
@@ -123,6 +129,7 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     // Amas de micro-triangles, puis plis aigus : gênent le décalage de la piale et trahissent un artefact
     // local.
     clean_short_edges(&mut mesh, 0.1 * params.edge.max(0.5));
+    debug_topology("micro-arêtes", &mesh);
     surfoxide_repair::relax_sharp_vertices(&mut mesh, 0.1, 20);
     Ok(WhiteSurface {
         mesh,
@@ -134,6 +141,23 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
         repair,
         remesh_dropped,
     })
+}
+
+/// Avec `SURFOXIDE_DEBUG`, affiche le bilan topologique après une étape.
+fn debug_topology(step: &str, mesh: &TriMesh) {
+    if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
+        let r = surfoxide_core::topology_report(mesh);
+        eprintln!(
+            "  après {step} : V={} χ={} composantes={} bords={} arêtes non variété={} sommets non variété={} orientation incohérente={}",
+            r.n_vertices,
+            r.euler_characteristic,
+            r.components,
+            r.boundary_edges,
+            r.non_manifold_edges,
+            r.non_manifold_vertices,
+            r.inconsistent_edges
+        );
+    }
 }
 
 /// Fusionne les arêtes plus courtes que `min_len` ; ne garde le résultat que s'il reste (après
@@ -193,29 +217,42 @@ pub fn pial_surface(
         match pial_from_white(&white.mesh, &field, &params) {
             Ok(p) => break p,
             Err(e) if attempt < 8 && !e.blocked.is_empty() => {
-                // D'abord sans créer d'intersection ; puis, pour une lame mince, lissage libre suivi
-                // d'une réparation.
-                let safe = attempt < 2;
-                clean_short_edges(&mut white.mesh, 0.05);
-                surfoxide_repair::relax_region(
-                    &mut white.mesh,
-                    &e.blocked,
-                    2 + attempt,
-                    5 * (1 + attempt),
-                    safe,
-                );
                 if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
                     eprintln!(
                         "piale : essai {attempt}, {} sommets bloquants",
                         e.blocked.len()
                     );
                 }
+                match attempt {
+                    // Détente sans créer d'intersection.
+                    0 | 1 => surfoxide_repair::relax_region(
+                        &mut white.mesh,
+                        &e.blocked,
+                        2 + attempt,
+                        5 * (1 + attempt),
+                        true,
+                    ),
+                    // Amas de micro-triangles : la fusion renumérote les sommets, les indices bloquants
+                    // ne valent plus ; on réessaie tel quel.
+                    2 => clean_short_edges(&mut white.mesh, 0.05),
+                    // Lame mince de substance blanche : on lui fait de la place en la reculant.
+                    _ => {
+                        shrink_locally(&mut white.mesh, &e.blocked, attempt - 1);
+                    }
+                }
                 attempt += 1;
             }
             Err(e) => return Err(e.to_string()),
         }
     };
+    // Distance minimale du contrat : les sommets blancs restés trop près de la piale reculent un peu.
+    surfoxide_pial::enforce_min_distance(&mut white.mesh, &pial.mesh, 1.5 * min_thickness, 5);
     Ok((pial, n_skeleton, iters))
+}
+
+/// Recule localement la surface blanche autour des sommets bloquants, de 0,05 mm par anneau.
+fn shrink_locally(mesh: &mut TriMesh, blocked: &[u32], rings: usize) {
+    surfoxide_pial::shrink_white(mesh, blocked, rings, 0.05 * rings as f64, None);
 }
 
 fn meta(hemi: Hemisphere, secondary: &str, labels: &Volume<i32>, seg: &Path) -> SurfaceMeta {

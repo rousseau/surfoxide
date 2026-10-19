@@ -199,7 +199,7 @@ fn close_disk(l: &[u32], pos: &mut Vec<Vec3>, out: &mut Vec<[u32; 3]>) {
 
 /// Relie deux boucles par un tube : `a` parcourue dans son sens, `b` à rebours, en choisissant à chaque
 /// pas la diagonale la plus courte.
-fn close_tube(a: &[u32], b: &[u32], pos: &[Vec3], out: &mut Vec<[u32; 3]>) {
+fn stitch(a: &[u32], b: &[u32], pos: &[Vec3], out: &mut Vec<[u32; 3]>) {
     let (m, n) = (a.len(), b.len());
     let p = |i: u32| pos[i as usize];
     // Départ : la paire de sommets la plus proche.
@@ -213,23 +213,36 @@ fn close_tube(a: &[u32], b: &[u32], pos: &[Vec3], out: &mut Vec<[u32; 3]>) {
         }
     }
     let (mut ia, mut ib) = (0, 0); // pas effectués sur a et sur b
+                                   // Pas faits sur b tant que ia = 0, et sur a tant que ib = 0 : les états (0, k) et (m, k) relient les
+                                   // mêmes sommets, de même que (k, 0) et (k, n). Le chemin ne doit pas passer par les deux, sinon la
+                                   // même diagonale borde quatre triangles (arête non variété).
+    let (mut b_at_start, mut a_at_start) = (0, 0);
     while ia < m || ib < n {
         let ai = a[(i0 + ia) % m];
         let ai1 = a[(i0 + ia + 1) % m];
         let bj = b[(j0 + n - ib % n) % n];
         let bj1 = b[(j0 + 2 * n - ib - 1) % n];
-        let advance_a = if ia == m {
+        // (m, 0) et (0, n) retombent aussi sur la diagonale de départ.
+        let a_forbidden = ia == m || (ia + 1 == m && ib <= b_at_start);
+        let b_forbidden = ib == n || (ib + 1 == n && ia <= a_at_start);
+        let advance_a = if a_forbidden {
             false
-        } else if ib == n {
+        } else if b_forbidden {
             true
         } else {
             vec3::dist(p(ai1), p(bj)) <= vec3::dist(p(ai), p(bj1))
         };
         if advance_a {
             out.push([ai, ai1, bj]);
+            if ib == 0 {
+                a_at_start += 1;
+            }
             ia += 1;
         } else {
             out.push([bj1, bj, ai]);
+            if ia == 0 {
+                b_at_start += 1;
+            }
             ib += 1;
         }
     }
@@ -288,7 +301,7 @@ pub fn marching_cubes(phi: &Volume<f64>, min_frac: f64) -> TriMesh {
                         Patch::Tube(a, b) => {
                             let a: Vec<u32> = a.iter().map(|&e| vid(e, &mut pos)).collect();
                             let b: Vec<u32> = b.iter().map(|&e| vid(e, &mut pos)).collect();
-                            close_tube(&a, &b, &pos, &mut faces);
+                            stitch(&a, &b, &pos, &mut faces);
                         }
                     }
                 }
@@ -321,6 +334,41 @@ mod tests {
         *seed ^= *seed >> 7;
         *seed ^= *seed << 17;
         *seed
+    }
+
+    /// Couture seule : chaque arête des boucles bordée une fois, chaque diagonale deux fois, quelles que
+    /// soient les positions (donc les choix de diagonales).
+    #[test]
+    fn couture_toujours_variete() {
+        let mut seed = 77u64;
+        for trial in 0..20000 {
+            let m = 3 + (trial % 4);
+            let n = 3 + ((trial / 4) % 4);
+            let mut pos = Vec::new();
+            for _ in 0..m + n {
+                pos.push([0, 1, 2].map(|_| (rng(&mut seed) % 1000) as f64 / 1000.0));
+            }
+            let a: Vec<u32> = (0..m as u32).collect();
+            let b: Vec<u32> = (m as u32..(m + n) as u32).collect();
+            let mut out = Vec::new();
+            stitch(&a, &b, &pos, &mut out);
+            assert_eq!(out.len(), m + n, "essai {trial}");
+            let mut count: std::collections::HashMap<(u32, u32), usize> = Default::default();
+            for f in &out {
+                for e in 0..3 {
+                    let (x, y) = (f[e], f[(e + 1) % 3]);
+                    *count.entry((x.min(y), x.max(y))).or_default() += 1;
+                }
+            }
+            for (&(x, y), &c) in &count {
+                let same_loop = (x < m as u32) == (y < m as u32);
+                let expected = if same_loop { 1 } else { 2 };
+                assert_eq!(
+                    c, expected,
+                    "essai {trial} (m={m}, n={n}) : arête {x}-{y} bordée {c} fois"
+                );
+            }
+        }
     }
 
     #[test]
@@ -424,6 +472,68 @@ mod tests {
             assert!(
                 m.signed_volume() > 0.0,
                 "essai {trial} : normales rentrantes"
+            );
+        }
+    }
+
+    /// Variété fermée sur un grand nombre d'objets aléatoires quelconques, de densités variées.
+    #[test]
+    fn variete_sur_objets_quelconques() {
+        let mut seed = 0xBADC0DEu64;
+        for trial in 0..5000 {
+            let n = 7;
+            let density = 2 + trial % 7; // sur 10
+            let mut v = Volume::filled([n, n, n], 1.0, IDENTITY);
+            for k in 1..n - 1 {
+                for j in 1..n - 1 {
+                    for i in 1..n - 1 {
+                        // Valeurs continues : la position des sommets, donc le choix des diagonales
+                        // des tubes, varie d'un cube à l'autre.
+                        let mag = 0.05 + (rng(&mut seed) % 1000) as f64 / 1000.0;
+                        let sign = if rng(&mut seed) % 10 < density as u64 {
+                            -1.0
+                        } else {
+                            1.0
+                        };
+                        v.set(i, j, k, sign * mag);
+                    }
+                }
+            }
+            let m = marching_cubes(&v, 0.0);
+            let rep = topology_report(&m);
+            assert!(rep.is_closed_oriented_manifold(), "essai {trial} : {rep:?}");
+        }
+    }
+
+    /// Beaucoup d'objets aléatoires plus grands, corrigés par les deux stratégies : couvre les
+    /// configurations rares (tubes de deux cubes voisins à travers une face ambiguë).
+    #[test]
+    fn nombreux_objets_aleatoires_corriges() {
+        let mut seed = 0xC0FFEEu64;
+        for trial in 0..400 {
+            let n = 14;
+            let density = 3 + trial % 5;
+            let mut v = Volume::filled([n, n, n], 1.0, IDENTITY);
+            for k in 1..n - 1 {
+                for j in 1..n - 1 {
+                    for i in 1..n - 1 {
+                        if rng(&mut seed) % 10 < density as u64 {
+                            v.set(i, j, k, -1.0);
+                        }
+                    }
+                }
+            }
+            let strategy = if trial % 2 == 0 {
+                Strategy::GrowObject
+            } else {
+                Strategy::GrowBackground
+            };
+            let c = correct_topology(&v, strategy, 0.5).unwrap();
+            let m = marching_cubes(&c.levelset, 0.0);
+            let rep = topology_report(&m);
+            assert!(
+                rep.is_sphere_like(),
+                "essai {trial} ({strategy:?}) : {rep:?}"
             );
         }
     }
