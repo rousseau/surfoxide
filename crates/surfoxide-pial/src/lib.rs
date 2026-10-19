@@ -13,11 +13,13 @@
 //!    blanche) est retenu localement. La piale reste ainsi sans auto-intersection et contient strictement
 //!    la surface blanche, avec la même connectivité.
 
+use surfoxide_check::bvh::Bvh;
+use surfoxide_check::distance::distance2_triangle;
 use surfoxide_core::distance::feature_transform;
 use surfoxide_core::vec3::{self, Vec3};
 use surfoxide_core::volume::invert_affine;
 use surfoxide_core::{Affine, TriMesh, VertexField, Volume};
-use surfoxide_repair::{cone_direction, conflicting_vertices, safe_update_against};
+use surfoxide_repair::{cone_direction, conflicting_vertices, safe_update_with};
 
 /// Voxels du cortex sur la nappe médiane d'un sillon enfoui : le voxel blanc le plus proche diffère d'un
 /// voisin à l'autre de plus de `max(3 h, ratio · d)` (h : plus grande taille de voxel, d : distance au
@@ -154,6 +156,9 @@ pub struct PialParams {
     pub min_offset: f64,
     /// Nombre de pas de progression de la piale.
     pub flow_steps: usize,
+    /// Distance minimale (mm) qu'une face de la piale doit garder avec tout sommet de la surface blanche
+    /// pendant la progression.
+    pub min_distance: f64,
 }
 
 impl Default for PialParams {
@@ -164,6 +169,7 @@ impl Default for PialParams {
             stop: 0.97,
             min_offset: 0.1,
             flow_steps: 10,
+            min_distance: 0.03,
         }
     }
 }
@@ -348,6 +354,25 @@ impl std::fmt::Display for PialError {
 
 impl std::error::Error for PialError {}
 
+/// Sommets des faces de `surface` situées à moins de `eps` d'un sommet de `points`.
+pub fn faces_near(surface: &TriMesh, points: &TriMesh, eps: f64) -> std::collections::HashSet<u32> {
+    let bvh = Bvh::new(surface);
+    let v = surface.vertices();
+    let f = surface.faces();
+    let mut out = std::collections::HashSet::new();
+    for &p in points.vertices() {
+        if let Some((g, d2)) = bvh.nearest(p, |g| {
+            let t = f[g as usize];
+            distance2_triangle(p, v[t[0] as usize], v[t[1] as usize], v[t[2] as usize])
+        }) {
+            if d2 < eps * eps {
+                out.extend(f[g as usize]);
+            }
+        }
+    }
+    out
+}
+
 /// Construit la piale à partir de la surface blanche `white` (fermée, sans auto-intersection) et du champ.
 pub fn pial_from_white(
     white: &TriMesh,
@@ -453,7 +478,13 @@ pub fn pial_from_white(
             .map(|i| (t * lengths[i]).max(offset[i]))
             .collect();
         let target: Vec<Vec3> = (0..white.n_vertices()).map(|i| at(i, s[i])).collect();
-        safe_update_against(&mut pial, &target, Some(white));
+        // Un pas est retenu s'il ferait se couper la piale (avec elle-même ou avec la blanche), ou s'il
+        // amènerait une face de la piale trop près d'un sommet blanc.
+        safe_update_with(&mut pial, &target, |m| {
+            let mut bad = conflicting_vertices(m, Some(white));
+            bad.extend(faces_near(m, white, params.min_distance));
+            bad
+        });
         for i in 0..white.n_vertices() {
             if pial.vertices()[i] == target[i] {
                 reached[i] = s[i];

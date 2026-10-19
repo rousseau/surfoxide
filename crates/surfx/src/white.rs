@@ -151,6 +151,7 @@ pub fn pial_surface(
     grids: &HemisphereGrids,
     white: &mut WhiteSurface,
     args: &PialArgs,
+    min_thickness: f64,
 ) -> Result<(surfoxide_pial::Pial, usize, usize), String> {
     // L'objet blanc corrigé prime sur le cortex.
     let cortex = grids.cortex.with_data(
@@ -181,6 +182,8 @@ pub fn pial_surface(
     let params = PialParams {
         min_offset: args.min_offset,
         stop: args.stop,
+        // Marge de 50 % sur le seuil du contrat.
+        min_distance: 1.5 * min_thickness,
         ..PialParams::default()
     };
     // Si quelques sommets bloquent le départ de la piale, on détend localement la surface blanche
@@ -255,7 +258,7 @@ pub fn run(
             Some(args) => {
                 let t = Instant::now();
                 Some((
-                    pial_surface(&grids, &mut w, args)?,
+                    pial_surface(&grids, &mut w, args, min_thickness)?,
                     t.elapsed().as_secs_f64(),
                 ))
             }

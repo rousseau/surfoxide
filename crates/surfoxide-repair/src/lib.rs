@@ -48,20 +48,28 @@ pub fn safe_update(mesh: &mut TriMesh, new: &[Vec3]) -> usize {
 /// Comme [`safe_update`], en interdisant aussi toute intersection avec `obstacle` (que `mesh` ne doit pas
 /// couper au départ).
 pub fn safe_update_against(mesh: &mut TriMesh, new: &[Vec3], obstacle: Option<&TriMesh>) -> usize {
+    safe_update_with(mesh, new, |m| conflicting_vertices(m, obstacle))
+}
+
+/// Applique les nouvelles positions `new`, puis ramène à leur ancienne position, de proche en proche, les
+/// sommets déplacés que `conflicts` signale, jusqu'à ce qu'aucun sommet déplacé ne soit en conflit. Les
+/// conflits qui ne touchent que des sommets immobiles existaient déjà : ils sont laissés tels quels, ce qui
+/// garantit la terminaison. Rend le nombre de sommets maintenus.
+pub fn safe_update_with(
+    mesh: &mut TriMesh,
+    new: &[Vec3],
+    conflicts: impl Fn(&TriMesh) -> HashSet<u32>,
+) -> usize {
     assert_eq!(new.len(), mesh.n_vertices());
     let old = mesh.vertices().to_vec();
     mesh.vertices_mut().copy_from_slice(new);
     let mut held: HashSet<u32> = HashSet::new();
     loop {
-        let bad = conflicting_vertices(mesh, obstacle);
-        let fresh: Vec<u32> = bad.into_iter().filter(|v| !held.contains(v)).collect();
+        let fresh: Vec<u32> = conflicts(mesh)
+            .into_iter()
+            .filter(|&v| !held.contains(&v) && old[v as usize] != new[v as usize])
+            .collect();
         if fresh.is_empty() {
-            // Les intersections restantes ne concernent que des sommets déjà ramenés : impossible si
-            // l'état initial était sain, puisqu'il suffit de tout ramener. On ramène tout le reste.
-            if !conflicting_vertices(mesh, obstacle).is_empty() {
-                mesh.vertices_mut().copy_from_slice(&old);
-                return mesh.n_vertices();
-            }
             return held.len();
         }
         for v in fresh {

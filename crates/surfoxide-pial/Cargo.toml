@@ -6,6 +6,5 @@ edition.workspace = true
 [dependencies]
 surfoxide-core = { path = "../surfoxide-core" }
 surfoxide-repair = { path = "../surfoxide-repair" }
-
-[dev-dependencies]
 surfoxide-check = { path = "../surfoxide-check" }
+
