@@ -11,6 +11,7 @@ Données : `bash scripts/fetch-data.sh` (segmentations dans $SURFOXIDE_DATA, par
 
 Usage :
     python3 scripts/validate.py --out ~/scratch/surfoxide-validation [--jobs 6] [--no-fetpype]
+        [--all --surf-jobs 4]
         [--reuse-fetpype ancien/results.json]
 
 Bibliothèque standard seulement. Les résultats (surfaces, rapports) restent hors du dépôt.
@@ -41,14 +42,19 @@ def seg_path(sub, ses, kind):
     return DATA / sub / ses / "anat" / f"{sub}_{ses}_res-0p5mm_desc-{kind}_dseg.nii.gz"
 
 
+def all_sessions():
+    """Toutes les sessions dont la segmentation BOUNTI-19 existe, triées par AG."""
+    rows = csv.DictReader(open(SUBJECTS))
+    out = [(r["subject_id"], r["session_id"], float(r["ga_weeks"])) for r in rows
+           if seg_path(r["subject_id"], r["session_id"], "bounti19").exists()]
+    return sorted(out, key=lambda s: (s[2], s[0], s[1]))
+
+
 def select_sessions():
     """Une session par semaine entière d'AG (la première par identifiant), dont la segmentation existe."""
-    rows = sorted(csv.DictReader(open(SUBJECTS)), key=lambda r: (r["subject_id"], r["session_id"]))
     by_week = {}
-    for r in rows:
-        week = int(float(r["ga_weeks"]))
-        if week not in by_week and seg_path(r["subject_id"], r["session_id"], "bounti19").exists():
-            by_week[week] = (r["subject_id"], r["session_id"], float(r["ga_weeks"]))
+    for sub, ses, ga in sorted(all_sessions(), key=lambda s: (s[0], s[1])):
+        by_week.setdefault(int(ga), (sub, ses, ga))
     return [by_week[w] for w in sorted(by_week)]
 
 
@@ -115,37 +121,43 @@ def main():
     ap.add_argument("--jobs", type=int, default=6, help="conteneurs fetpype en parallèle")
     ap.add_argument("--no-fetpype", action="store_true")
     ap.add_argument("--multi", type=int, default=4, help="sessions multi-BOUNTI-43")
+    ap.add_argument("--all", action="store_true",
+                    help="toutes les sessions (BOUNTI-19 et multi-BOUNTI-43) au lieu d'une par semaine ; "
+                         "fetpype reste sur une session par semaine")
+    ap.add_argument("--surf-jobs", type=int, default=1, help="sessions surfoxide traitées en parallèle")
     ap.add_argument("--reuse-fetpype", type=Path,
                     help="results.json d'une exécution précédente dont on reprend les résultats fetpype")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     if not SURFX.exists():
         sys.exit("compiler d'abord : cargo build --release")
-    sessions = select_sessions()
+    weekly = select_sessions()
+    sessions = all_sessions() if args.all else weekly
     print(f"{len(sessions)} sessions BOUNTI-19 ({sessions[0][2]:.1f} à {sessions[-1][2]:.1f} SA)")
     results = []
 
     fetpype_futures = {}
     pool = cf.ThreadPoolExecutor(max_workers=args.jobs)
     if not args.no_fetpype:
-        for sub, ses, ga in sessions:
+        for sub, ses, ga in weekly:
             for hemi in "LR":
                 fetpype_futures[pool.submit(fetpype_hemi, args.out, sub, ses, hemi)] = (sub, ses, ga)
 
-    for sub, ses, ga in sessions:
-        r = surfoxide_session(args.out, sub, ses, ga, "bounti19")
-        print(f"surfoxide {sub} {ses} ({ga:.1f} SA) : {r['seconds']:.0f} s, code {r['returncode']}",
-              flush=True)
-        results.append(r)
-
-    # Multi-BOUNTI : sessions réparties sur la plage d'AG.
+    # Multi-BOUNTI : toutes les sessions avec --all, sinon quelques-unes réparties sur la plage d'AG.
     multi = [s for s in sessions if (s[0], s[1]) not in FAILED_MULTI and seg_path(s[0], s[1], "multibounti43").exists()]
-    step = max(1, len(multi) // max(1, args.multi))
-    for sub, ses, ga in multi[::step][: args.multi]:
-        r = surfoxide_session(args.out, sub, ses, ga, "multibounti43")
-        print(f"surfoxide multi-BOUNTI {sub} {ses} ({ga:.1f} SA) : {r['seconds']:.0f} s, code {r['returncode']}",
-              flush=True)
-        results.append(r)
+    if not args.all:
+        step = max(1, len(multi) // max(1, args.multi))
+        multi = multi[::step][: args.multi]
+    jobs = [(s, "bounti19") for s in sessions] + [(s, "multibounti43") for s in multi]
+    with cf.ThreadPoolExecutor(max_workers=args.surf_jobs) as surf_pool:
+        futures = {surf_pool.submit(surfoxide_session, args.out, sub, ses, ga, labels): (sub, ses, ga, labels)
+                   for (sub, ses, ga), labels in jobs}
+        for k, fut in enumerate(cf.as_completed(futures), 1):
+            sub, ses, ga, labels = futures[fut]
+            r = fut.result()
+            print(f"[{k}/{len(jobs)}] surfoxide {labels} {sub} {ses} ({ga:.1f} SA) : {r['seconds']:.0f} s, "
+                  f"code {r['returncode']}", flush=True)
+            results.append(r)
 
     fet = {}
     for fut in cf.as_completed(fetpype_futures):
