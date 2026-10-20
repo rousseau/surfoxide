@@ -57,6 +57,15 @@ P1 : intégrateur ODE dans Burn, réseaux de déformation à la CoSeg (faiblemen
 segmentations de medoxide), opérateurs différentiels, métriques (épaisseur, profondeur sulcale,
 gyrification, métrique spectrale), projection des lobes multi-BOUNTI, lecture des surfaces simulées
 renvoyées par gyroxide.
+Profondeur sulcale — fait (`surfoxide-metrics`, `surfx depth`, écrite par `surfx run` sur la blanche) : DPF*
+(Dieudonné, Auzias, Lefèvre, Comput Biol Med 2026), pas le `sulc` de FreeSurfer (dépendant de la taille).
+Conventions reprises du code des auteurs (github.com/maximedieudonne/DPF-star) : L = (volume de l'enveloppe
+convexe)^(1/3), système (S/2 + αB) D = 2B(K − K̄), D* en % de L, α_ref = 500. Vérifiée contre ce code sur
+l'atlas dHCP 21/28/36 SA (courbure à 6e-8, D* à 6e-4 près, tolérance de leur solveur) ; invariance par
+homothétie et robustesse au remaillage (r ≥ 0,987 de 0,35 à 1 mm) testées. Points ouverts : benchmark Zenodo
+(repères tracés sur des surfaces dHCP release 1 et KKI, à obtenir) ; avant 28 SA, α_ref = 500 donne un noyau
+de ~1,2 mm et la DPF* capte les ondulations millimétriques du contour de la segmentation (présentes sur la
+blanche à toutes les échelles, pas un défaut du maillage).
 
 Baseline de référence pour P0 : fetpype `surface_processing` (github.com/fetpype/surface_processing).
 

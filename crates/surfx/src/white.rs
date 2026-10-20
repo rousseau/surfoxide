@@ -368,6 +368,19 @@ pub fn run(
         )
         .map_err(|e| format!("{path}: {e}"))?;
         report["cortex_fraction"] = (n_cortical as f64 / cortical.len().max(1) as f64).into();
+        // Courbure moyenne et profondeur sulcale DPF* de la blanche (surface de référence de la DPF*).
+        let curv = surfoxide_metrics::curvature(&w.mesh);
+        let dpf = surfoxide_metrics::dpf_star(&w.mesh, &curv.mean, surfoxide_metrics::depth::ALPHA_REF);
+        for (name, values) in [("curv", curv.mean), ("dpfstar", dpf.depth)] {
+            let path = format!("{prefix}_white_{name}.shape.gii");
+            surfoxide_io::gifti::write_fields(
+                &path,
+                &[surfoxide_core::VertexField::new(name, values)],
+                &meta(hemi, "GrayWhite", &labels, seg),
+            )
+            .map_err(|e| format!("{path}: {e}"))?;
+        }
+        report["characteristic_length"] = dpf.characteristic_length.into();
         if let Some(((pial, n_skeleton, iters), secs)) = pial {
             let pial_report = surfoxide_check::check_surface(&pial.mesh);
             let pair = surfoxide_check::check_pair(&w.mesh, &pial.mesh, min_thickness);

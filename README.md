@@ -58,6 +58,8 @@ crates/
   surfoxide-remesh/ remaillage isotrope (Botsch–Kobbelt) sur une table des coins modifiable
   surfoxide-repair/ suppression des auto-intersections par déplacement de sommets
   surfoxide-pial/   piale par les lignes de courant du champ de Laplace, sillons enfouis
+  surfoxide-metrics/ Laplace–Beltrami éléments finis, courbure (Rusinkiewicz), enveloppe convexe,
+                    profondeur sulcale DPF* invariante d'échelle (Dieudonné, Auzias, Lefèvre 2026)
   surfx/            binaire CLI : une sous-commande par module
 scripts/
   setup-linux.sh    préparation d'une machine Ubuntu avec GPU NVIDIA
@@ -72,4 +74,5 @@ scripts/
 
 - Coordonnées dans le repère monde RAS, en mm ; l'affine de l'image source est conservée.
 - Faces orientées dans le sens trigonométrique vu de l'extérieur (normales sortantes).
-- Surfaces en GIfTI, maillages volumiques en VTK `.vtu`, images en NIfTI.
+- Surfaces et champs par sommet en GIfTI, images en NIfTI ; aucun maillage volumique (le `.vtu` reste
+  côté gyroxide).

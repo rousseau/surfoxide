@@ -5610,6 +5610,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "surfoxide-metrics"
+version = "0.1.0"
+dependencies = [
+ "robust",
+ "surfoxide-core",
+]
+
+[[package]]
 name = "surfoxide-pial"
 version = "0.1.0"
 dependencies = [
@@ -5657,6 +5665,7 @@ dependencies = [
  "surfoxide-extract",
  "surfoxide-io",
  "surfoxide-mask",
+ "surfoxide-metrics",
  "surfoxide-pial",
  "surfoxide-remesh",
  "surfoxide-repair",

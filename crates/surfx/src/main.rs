@@ -10,6 +10,7 @@
 //! - `run` : surfaces blanche et piale de chaque hémisphère, épaisseur et rapport de contrat.
 //! - `eval` : distance d'une surface à la frontière de la segmentation, qualité du maillage, contrat.
 //! - `check` : contrôle du contrat d'une surface (topologie, auto-intersections) ou d'un couple WM/piale.
+//! - `depth` : courbure moyenne et profondeur sulcale DPF* (invariante d'échelle) d'une surface.
 
 mod eval;
 mod white;
@@ -134,6 +135,17 @@ enum Command {
         #[arg(long)]
         json: Option<PathBuf>,
     },
+    /// Courbure moyenne et profondeur sulcale DPF* d'une surface fermée
+    Depth {
+        /// Surface (GIfTI, VTP, PLY, STL, FreeSurfer)
+        surface: PathBuf,
+        /// Paramètre d'échelle α_ref de la DPF* (sans dimension ; 500 dans l'article de référence)
+        #[arg(long, default_value_t = surfoxide_metrics::depth::ALPHA_REF)]
+        alpha: f64,
+        /// Préfixe des fichiers écrits : <préfixe>_curv.shape.gii, <préfixe>_dpfstar.shape.gii
+        #[arg(long, short)]
+        out: PathBuf,
+    },
     /// Masque blanc fermé d'un hémisphère (NIfTI u8) à partir d'une segmentation
     Mask {
         /// Segmentation NIfTI
@@ -231,6 +243,33 @@ fn run_convert(input: &PathBuf, output: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+fn run_depth(surface: &PathBuf, alpha: f64, out: &std::path::Path) -> Result<(), String> {
+    use surfoxide_core::VertexField;
+    use surfoxide_io::gifti::{write_fields, SurfaceMeta};
+    let mesh = surfoxide_io::read_mesh(surface).map_err(|e| format!("{}: {e}", surface.display()))?;
+    let t0 = Instant::now();
+    let curv = surfoxide_metrics::curvature(&mesh);
+    let dpf = surfoxide_metrics::dpf_star(&mesh, &curv.mean, alpha);
+    println!(
+        "{} : {} sommets, L = {:.2} mm, α = {:.4} mm⁻², DPF* dans [{:.2}, {:.2}] ({:.1} s)",
+        surface.display(),
+        mesh.n_vertices(),
+        dpf.characteristic_length,
+        dpf.alpha,
+        dpf.depth.iter().cloned().fold(f64::MAX, f64::min),
+        dpf.depth.iter().cloned().fold(f64::MIN, f64::max),
+        t0.elapsed().as_secs_f64()
+    );
+    let prefix = out.display();
+    for (name, values) in [("curv", curv.mean), ("dpfstar", dpf.depth)] {
+        let path = format!("{prefix}_{name}.shape.gii");
+        write_fields(&path, &[VertexField::new(name, values)], &SurfaceMeta::default())
+            .map_err(|e| format!("{path}: {e}"))?;
+        println!("écrit : {path}");
+    }
+    Ok(())
+}
+
 fn run_mask(seg: &PathBuf, table: &LabelTable, hemi: Hemisphere, out: &PathBuf) -> Result<(), String> {
     let (labels, header) = surfoxide_io::nifti::read_labels(seg).map_err(|e| format!("{}: {e}", seg.display()))?;
     let mask = surfoxide_mask::white_mask(&labels, table, hemi);
@@ -297,6 +336,7 @@ fn main() -> ExitCode {
         }
         Command::Convert { input, output } => run_convert(&input, &output),
         Command::Mask { seg, labels, hemi, out } => run_mask(&seg, &labels, hemi, &out),
+        Command::Depth { surface, alpha, out } => run_depth(&surface, alpha, &out),
         Command::Eval {
             surface,
             seg,

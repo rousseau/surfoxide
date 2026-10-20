@@ -1,0 +1,8 @@
+[package]
+name = "surfoxide-metrics"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+surfoxide-core = { path = "../surfoxide-core" }
+robust = { workspace = true }
