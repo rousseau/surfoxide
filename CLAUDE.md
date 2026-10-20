@@ -10,6 +10,10 @@ par les données, pas par le code :
 - **gyroxide** : tétraédrisation, champs issus des images, simulation du plissement ; renvoie sa
   surface simulée à surfoxide pour qu'elle soit mesurée par le même code que les surfaces réelles.
 
+Périmètre : **surfoxide ne traite que des surfaces** (triangulaires, et champs par sommet). Aucun
+maillage volumique ici : la génération des maillages tétraédriques appartient à gyroxide, à partir
+des surfaces livrées par surfoxide. Ne pas ajouter de tétraédrisation ni de lecture `.vtu` dans ce dépôt.
+
 Document de référence (état de l'art, positionnement, priorités) :
 https://claude.ai/code/artifact/492fa76d-b8bf-4ad7-bf59-796739415874
 
@@ -17,7 +21,8 @@ https://claude.ai/code/artifact/492fa76d-b8bf-4ad7-bf59-796739415874
 
 - Coordonnées monde RAS en mm ; affine de l'image source conservée dans les métadonnées.
 - Faces orientées, normales sortantes (`TriMesh::signed_volume() > 0` pour une surface fermée).
-- Formats : NIfTI en entrée, GIfTI pour surfaces et champs par sommet, VTK `.vtu` côté gyroxide.
+- Formats : NIfTI en entrée, GIfTI pour surfaces et champs par sommet. Le `.vtu` (volumique) reste
+  côté gyroxide ; ses surfaces simulées reviennent sous forme de surfaces (GIfTI ou VTK PolyData).
 - Une surface livrée à gyroxide est : fermée, 2-variété, orientée de façon cohérente, d'un seul
   tenant, de genre 0, sans auto-intersection ; la WM est strictement dans la piale avec une
   épaisseur minimale.
@@ -45,11 +50,13 @@ Présentation : https://claude.ai/artifact/DVcshJu5TQaxDFMLKSLWdZ
 Reste en P0 : 7 hémisphères dont la piale ne démarre pas (arêtes vives de la blanche après 28 SA ; les
 modifications du dépliage essayées déplaçaient les échecs sans les réduire), 2 sous le seuil de distance ;
 au fond des sillons, la piale reste en retrait (~5 % des sommets, 0,4 à 0,7 mm, rapporté dans
-`pial_mean_missing`, sans effet sur l'épaisseur) ; chargement effectif dans gyroxide.
+`pial_mean_missing`, sans effet sur l'épaisseur) ; essai réel de bout en bout avec gyroxide (sa
+tétraédrisation à partir de nos surfaces, puis mesure ici de sa surface simulée).
 
 P1 : intégrateur ODE dans Burn, réseaux de déformation à la CoSeg (faiblement supervisés par les
 segmentations de medoxide), opérateurs différentiels, métriques (épaisseur, profondeur sulcale,
-gyrification, métrique spectrale), projection des lobes multi-BOUNTI, lecture `.vtu` de gyroxide.
+gyrification, métrique spectrale), projection des lobes multi-BOUNTI, lecture des surfaces simulées
+renvoyées par gyroxide.
 
 Baseline de référence pour P0 : fetpype `surface_processing` (github.com/fetpype/surface_processing).
 

@@ -12,6 +12,11 @@ surfoxide fait le lien, par les données, entre deux projets :
 - gyroxide simule le plissement cortical à partir des surfaces (GIfTI) et renvoie ses
   surfaces simulées, mesurées par le même code que les surfaces réelles.
 
+**Périmètre : surfoxide ne traite que des surfaces.** Il ne produit ni ne lit de maillage
+volumique : la tétraédrisation des surfaces qu'il livre est faite par gyroxide. Ce qui circule
+entre les deux dépôts, ce sont des surfaces triangulaires (et des champs par sommet) respectant
+le contrat ci-dessous.
+
 | Sous-commande | Rôle |
 |---|---|
 | `surfx device` | Vérifie qu'un backend Burn calcule sur la machine (CPU, CUDA ou wgpu) |
