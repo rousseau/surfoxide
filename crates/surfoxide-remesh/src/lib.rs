@@ -182,15 +182,6 @@ fn dihedral_cos(m: &HalfEdgeMesh, h: u32) -> f64 {
     vec3::dot(n1, n2)
 }
 
-/// Plus petit cosinus de l'angle dièdre sur les arêtes des faces autour de `v`.
-fn local_min_cos(m: &HalfEdgeMesh, v: u32) -> f64 {
-    m.outgoing(v)
-        .into_iter()
-        .flat_map(|e| [e, m.next(e)])
-        .map(|e| dihedral_cos(m, e))
-        .fold(f64::INFINITY, f64::min)
-}
-
 /// Déplie les plis : arêtes dont les deux faces ont des normales de cosinus inférieur à `max_cos` (surface
 /// repliée en nageoire, triangles en aiguille). Pour chacune, la plus courte arête de ses deux faces est
 /// fusionnée en son milieu, sous la link condition (topologie conservée) et sans créer de face d'aire
@@ -214,61 +205,15 @@ pub fn unfold(mesh: &TriMesh, max_cos: f64, passes: usize) -> Result<(TriMesh, u
                 continue;
             }
             let g = m.twin(h);
-            // D'abord la bascule : deux triangles fins repliés l'un sur l'autre se déplient en reliant leurs
-            // sommets opposés, s'ils ne sont pas déjà voisins.
-            let (a, b) = (m.from(h), m.to(h));
-            let (c, d) = (m.to(m.next(h)), m.to(m.next(g)));
-            let p = |v: u32| m.pos[v as usize];
-            let (n1, n2) = (
-                vec3::triangle_normal(p(a), p(d), p(c)),
-                vec3::triangle_normal(p(d), p(b), p(c)),
-            );
-            let unfolds = vec3::norm(n1) > 1e-10
-                && vec3::norm(n2) > 1e-10
-                && vec3::dot(vec3::normalize(n1), vec3::normalize(n2)) > max_cos.max(0.0);
-            if unfolds && m.valence(a) > 3 && m.valence(b) > 3 && m.flip(h) {
-                continue;
-            }
-            // Puis le déplacement d'un des quatre sommets au barycentre de ses voisins (une pointe de valence 3,
-            // par exemple), retenu s'il défait le pli sans en créer autour.
-            let mut moved = false;
-            for v in [a, b, c, d] {
-                let old = m.pos[v as usize];
-                let nb = m.neighbors(v);
-                let mean = nb.iter().fold([0.0; 3], |acc, &w| vec3::add(acc, m.pos[w as usize]));
-                m.pos[v as usize] = vec3::scale(mean, 1.0 / nb.len() as f64);
-                if dihedral_cos(&m, h) >= max_cos && local_min_cos(&m, v) >= max_cos {
-                    moved = true;
-                    break;
-                }
-                m.pos[v as usize] = old;
-            }
-            if moved {
-                continue;
-            }
             // Arêtes des deux faces, de la plus courte à la plus longue.
-            // Les deux sens de chaque arête : la fusion supprime le sommet de départ, qui doit pouvoir être la
-            // pointe à absorber.
-            let mut cand: Vec<u32> = [h, m.next(h), m.prev(h), m.next(g), m.prev(g)]
-                .into_iter()
-                .flat_map(|e| [e, m.twin(e)])
-                .collect();
-            cand.sort_by(|&x, &y| {
-                (m.valence(m.from(y)) == 3)
-                    .cmp(&(m.valence(m.from(x)) == 3))
-                    .then(m.edge_length(x).total_cmp(&m.edge_length(y)))
-            });
+            let mut cand: Vec<u32> = [h, m.next(h), m.prev(h), m.next(g), m.prev(g)].to_vec();
+            cand.sort_by(|&x, &y| m.edge_length(x).total_cmp(&m.edge_length(y)));
             for e in cand {
                 let (a, b) = (m.from(e), m.to(e));
                 if !m.can_collapse(e) {
                     continue;
                 }
-                // Une pointe de valence 3 est absorbée par son voisin ; sinon fusion au milieu.
-                let p = if m.valence(a) == 3 {
-                    m.pos[b as usize]
-                } else {
-                    vec3::lerp(m.pos[a as usize], m.pos[b as usize], 0.5)
-                };
+                let p = vec3::lerp(m.pos[a as usize], m.pos[b as usize], 0.5);
                 let degenerate = [a, b].iter().any(|&v| {
                     m.outgoing(v).into_iter().any(|o| {
                         let t = m.faces[(o / 3) as usize];

@@ -38,12 +38,14 @@ P0, des surfaces utilisables par gyroxide :
    lignes de courant du champ de Laplace, sillons enfouis ouverts par leur nappe médiane.
 Validation sur toute la cohorte (octobre 2026, `scripts/validate.py --all`, 193 sessions de 20 à 38 SA) :
 contrat complet (blanche + piale + distance minimale) 383/386 hémisphères BOUNTI-19 (99,2 %) et 378/384
-multi-BOUNTI-43 (98,4 %) ; HD95 médian 0,17 et 0,19 mm ; épaisseur corticale médiane 1,66 et 1,47 mm.
+multi-BOUNTI-43 (98,4 %) ; HD95 médian 0,17 et 0,19 mm ; épaisseur corticale médiane (longueur des lignes
+de courant de Laplace, face médiale exclue) 1,70 et 1,49 mm.
 Comparaison à fetpype (19 sessions) : blanche conforme 46/46 contre 24/38, HD95 0,18 contre 0,40 mm.
 Présentation : https://claude.ai/artifact/DVcshJu5TQaxDFMLKSLWdZ
-Reste en P0 : 7 hémisphères dont la piale ne démarre pas (plis résiduels de la blanche après 28 SA),
-2 sous le seuil de distance ; sommets de piale retenus dans les sillons étroits (5 à 10 % après 30 SA) ;
-chargement effectif dans gyroxide.
+Reste en P0 : 7 hémisphères dont la piale ne démarre pas (arêtes vives de la blanche après 28 SA ; les
+modifications du dépliage essayées déplaçaient les échecs sans les réduire), 2 sous le seuil de distance ;
+au fond des sillons, la piale reste en retrait (~5 % des sommets, 0,4 à 0,7 mm, rapporté dans
+`pial_mean_missing`, sans effet sur l'épaisseur) ; chargement effectif dans gyroxide.
 
 P1 : intégrateur ODE dans Burn, réseaux de déformation à la CoSeg (faiblement supervisés par les
 segmentations de medoxide), opérateurs différentiels, métriques (épaisseur, profondeur sulcale,

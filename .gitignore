@@ -11,3 +11,4 @@
 
 # Données locales
 /data/
+__pycache__/

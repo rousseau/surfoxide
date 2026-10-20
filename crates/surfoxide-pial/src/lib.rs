@@ -426,28 +426,12 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
     // long de la normale moyenne traverserait une face voisine, aussi petit soit-il.
     let vf = surfoxide_core::adjacency::vertex_faces(white);
     let fnorm = surfoxide_core::adjacency::face_normals(white);
-    // Normales lissées sur le voisinage (champ de directions régulier : des sommets voisins s'écartent
-    // ensemble), puis ramenées dans le cône des faces incidentes, nettement (cosinus 0,3) si possible.
-    let nb = surfoxide_core::adjacency::vertex_neighbors(white);
-    let mut smooth = surfoxide_core::adjacency::vertex_normals(white);
-    for _ in 0..3 {
-        smooth = (0..smooth.len())
-            .map(|i| {
-                let s = nb[i]
-                    .iter()
-                    .fold(smooth[i], |acc, &j| vec3::add(acc, smooth[j as usize]));
-                vec3::normalize(s)
-            })
-            .collect();
-    }
-    let normals: Vec<Vec3> = smooth
+    let normals: Vec<Vec3> = surfoxide_core::adjacency::vertex_normals(white)
         .into_iter()
         .enumerate()
         .map(|(v, n)| {
             let fs: Vec<Vec3> = vf[v].iter().map(|&f| fnorm[f as usize]).collect();
-            cone_direction(n, &fs, 0.3)
-                .or_else(|| cone_direction(n, &fs, 0.05))
-                .unwrap_or(n)
+            cone_direction(n, &fs, 0.05).unwrap_or(n)
         })
         .collect();
     let paths: Vec<Vec<Vec3>> = white
@@ -458,18 +442,6 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
         .collect();
     let lengths: Vec<f64> = paths.iter().map(|p| path_length(p)).collect();
     let at = |i: usize, s: f64| point_at(&paths[i], s, normals[i]);
-    // Décalage d'un polyèdre : pour que chaque face incidente s'écarte d'au moins ε, le sommet s'écarte de
-    // ε / min(d · n_f) le long de sa direction d (au fond d'une vallée étroite, d · n_f est petit).
-    let stretch: Vec<f64> = (0..white.n_vertices())
-        .map(|v| {
-            let c = vf[v]
-                .iter()
-                .map(|&f| vec3::dot(normals[v], fnorm[f as usize]))
-                .fold(f64::INFINITY, f64::min);
-            1.0 / c.max(0.2)
-        })
-        .collect();
-
     // Décalage initial le long de la normale, réduit localement tant qu'il crée des intersections (entre
     // deux berges très proches, ou là où la ligne de courant part en biais).
     let mut offset = vec![params.min_offset; white.n_vertices()];
@@ -482,7 +454,7 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
     const HALVINGS: usize = 12;
     let debug = std::env::var_os("SURFOXIDE_DEBUG").is_some();
     for (i, p) in pial.vertices_mut().iter_mut().enumerate() {
-        *p = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i] * stretch[i]));
+        *p = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i]));
     }
     let mut bad = conflicting_vertices(&pial, Some(white));
     let mut attempt = 0;
@@ -492,27 +464,8 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
         for &v in &region {
             offset[v as usize] /= 2.0;
         }
-        // Champ de décalages régulier : pas plus de 1,3 fois le décalage du voisin le plus bas. Un sommet
-        // presque collé à la blanche à côté de voisins restés au large inclinerait les faces qui les relient,
-        // qui plongeraient alors sous les faces blanches voisines.
-        for _ in 0..30 {
-            let mut changed = false;
-            for i in 0..offset.len() {
-                let low = ring[i]
-                    .iter()
-                    .map(|&j| offset[j as usize])
-                    .fold(f64::INFINITY, f64::min);
-                if offset[i] > 1.3 * low {
-                    offset[i] = 1.3 * low;
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
         for (i, p) in pial.vertices_mut().iter_mut().enumerate() {
-            *p = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i] * stretch[i]));
+            *p = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i]));
         }
         bad = conflicting_vertices(&pial, Some(white));
         attempt += 1;
@@ -559,11 +512,10 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
                 })
                 .fold(f64::INFINITY, f64::min);
             eprintln!(
-                "  bloqué {v} : auto-intersection de la piale {}, valence {}, cône {cone}, angle min {min_angle:.1}°, décalage {:.1e}, étirement {:.2}, |P−W| {:.2e}, direction {:?}",
+                "  bloqué {v} : auto-intersection de la piale {}, valence {}, cône {cone}, angle min {min_angle:.1}°, décalage {:.1e}, |P−W| {:.2e}, direction {:?}",
                 selfs.contains(&v),
                 nb[v as usize].len(),
                 offset[v as usize],
-                stretch[v as usize],
                 vec3::dist(pial.vertices()[v as usize], white.vertices()[v as usize]),
                 normals[v as usize]
             );

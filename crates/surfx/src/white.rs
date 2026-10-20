@@ -118,11 +118,9 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     // Amas de micro-triangles, puis plis aigus : gênent le décalage de la piale et trahissent un artefact
     // local.
     clean_short_edges(&mut mesh, 0.1 * params.edge.max(0.5));
-    surfoxide_repair::relax_sharp_vertices(&mut mesh, 0.1, 20);
-    // En dernier : la détente des sommets anguleux garde certains sommets en place et peut replier la
-    // surface autour d'eux.
     unfold(&mut mesh);
-    debug_topology("micro-arêtes, sommets anguleux et plis", &mesh);
+    debug_topology("micro-arêtes et plis", &mesh);
+    surfoxide_repair::relax_sharp_vertices(&mut mesh, 0.1, 20);
     Ok(WhiteSurface {
         mesh,
         object: c.object,
@@ -155,7 +153,7 @@ fn debug_topology(step: &str, mesh: &TriMesh) {
 /// Déplie les plis (faces voisines de normales opposées) ; ne garde le résultat que s'il reste (après
 /// réparation) sans intersection.
 fn unfold(mesh: &mut TriMesh) {
-    if let Ok((mut m, remaining)) = surfoxide_remesh::unfold(mesh, -0.5, 10) {
+    if let Ok((mut m, remaining)) = surfoxide_remesh::unfold(mesh, -0.5, 5) {
         let repair = surfoxide_repair::repair_intersections(&mut m, 30);
         if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
             eprintln!(
