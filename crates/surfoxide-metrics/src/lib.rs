@@ -14,4 +14,4 @@ pub mod laplacian;
 pub mod sparse;
 
 pub use curvature::{curvature, Curvature};
-pub use depth::{depth_potential, dpf_star, DpfStar};
+pub use depth::{depth_potential, dpf_star, DpfStar, Length};

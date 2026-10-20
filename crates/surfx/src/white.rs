@@ -370,7 +370,12 @@ pub fn run(
         report["cortex_fraction"] = (n_cortical as f64 / cortical.len().max(1) as f64).into();
         // Courbure moyenne et profondeur sulcale DPF* de la blanche (surface de référence de la DPF*).
         let curv = surfoxide_metrics::curvature(&w.mesh);
-        let dpf = surfoxide_metrics::dpf_star(&w.mesh, &curv.mean, surfoxide_metrics::depth::ALPHA_REF);
+        let dpf = surfoxide_metrics::dpf_star(
+            &w.mesh,
+            &curv.mean,
+            surfoxide_metrics::depth::ALPHA_REF,
+            surfoxide_metrics::Length::ConvexHull,
+        );
         for (name, values) in [("curv", curv.mean), ("dpfstar", dpf.depth)] {
             let path = format!("{prefix}_white_{name}.shape.gii");
             surfoxide_io::gifti::write_fields(

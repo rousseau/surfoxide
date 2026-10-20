@@ -35,6 +35,15 @@ struct Cli {
     command: Command,
 }
 
+/// Longueur caractéristique de la DPF*, telle qu'écrite sur la ligne de commande (`--length`).
+#[derive(Clone, Copy, ValueEnum)]
+enum LengthArg {
+    /// Volume de l'enveloppe convexe (code de référence)
+    Hull,
+    /// Volume enfermé par la surface (texte de l'article)
+    Volume,
+}
+
 /// Backend de calcul, tel qu'écrit sur la ligne de commande (`--backend`).
 #[derive(Clone, Copy, ValueEnum)]
 enum BackendArg {
@@ -142,6 +151,9 @@ enum Command {
         /// Paramètre d'échelle α_ref de la DPF* (sans dimension ; 500 dans l'article de référence)
         #[arg(long, default_value_t = surfoxide_metrics::depth::ALPHA_REF)]
         alpha: f64,
+        /// Volume définissant la longueur caractéristique L = V^(1/3) : enveloppe convexe ou volume enfermé
+        #[arg(long, value_enum, default_value = "hull")]
+        length: LengthArg,
         /// Préfixe des fichiers écrits : <préfixe>_curv.shape.gii, <préfixe>_dpfstar.shape.gii
         #[arg(long, short)]
         out: PathBuf,
@@ -243,15 +255,20 @@ fn run_convert(input: &PathBuf, output: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn run_depth(surface: &PathBuf, alpha: f64, out: &std::path::Path) -> Result<(), String> {
+fn run_depth(
+    surface: &PathBuf,
+    alpha: f64,
+    length: surfoxide_metrics::Length,
+    out: &std::path::Path,
+) -> Result<(), String> {
     use surfoxide_core::VertexField;
     use surfoxide_io::gifti::{write_fields, SurfaceMeta};
     let mesh = surfoxide_io::read_mesh(surface).map_err(|e| format!("{}: {e}", surface.display()))?;
     let t0 = Instant::now();
     let curv = surfoxide_metrics::curvature(&mesh);
-    let dpf = surfoxide_metrics::dpf_star(&mesh, &curv.mean, alpha);
+    let dpf = surfoxide_metrics::dpf_star(&mesh, &curv.mean, alpha, length);
     println!(
-        "{} : {} sommets, L = {:.2} mm, α = {:.4} mm⁻², DPF* dans [{:.2}, {:.2}] ({:.1} s)",
+        "{} : {} sommets, L = {:.2} mm, α = {:.4} mm⁻², DPF* dans [{:.3}, {:.3}] ({:.1} s)",
         surface.display(),
         mesh.n_vertices(),
         dpf.characteristic_length,
@@ -336,7 +353,18 @@ fn main() -> ExitCode {
         }
         Command::Convert { input, output } => run_convert(&input, &output),
         Command::Mask { seg, labels, hemi, out } => run_mask(&seg, &labels, hemi, &out),
-        Command::Depth { surface, alpha, out } => run_depth(&surface, alpha, &out),
+        Command::Depth {
+            surface,
+            alpha,
+            length,
+            out,
+        } => {
+            let length = match length {
+                LengthArg::Hull => surfoxide_metrics::Length::ConvexHull,
+                LengthArg::Volume => surfoxide_metrics::Length::Enclosed,
+            };
+            run_depth(&surface, alpha, length, &out)
+        }
         Command::Eval {
             surface,
             seg,

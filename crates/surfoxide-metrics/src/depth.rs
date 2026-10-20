@@ -9,12 +9,17 @@
 //! Comput Biol Med 212, 2026) : avec la longueur caractéristique L de la surface, on résout la DPF avec
 //! `α = α_ref / L²` puis on divise par L. Une homothétie de la surface laisse alors D* inchangée.
 //!
-//! Les conventions sont celles du code de référence des auteurs (github.com/maximedieudonne/DPF-star),
-//! qui diffèrent sur trois points de l'article et sont reproduites telles quelles :
-//! - L est la racine cubique du volume de l'**enveloppe convexe** (l'article parle du volume de la surface) ;
+//! Choix repris du code des auteurs (github.com/maximedieudonne/DPF-star) et confirmés par eux :
 //! - le système discret est `(S/2 + α B) D = 2 B (K − K̄)`, S raideur et B masse éléments finis, K̄
-//!   pondérée par la diagonale de B (l'équation 3 de l'article s'écrit sans les facteurs 1/2 et 2) ;
-//! - D* est exprimée en pourcentage de L (facteur 100).
+//!   pondérée par la diagonale de B : c'est un choix de formalisation, l'équation 3 de l'article s'écrivant
+//!   sans les facteurs 1/2 et 2 ;
+//! - L est la racine cubique d'un volume, au choix celui de l'enveloppe convexe (par défaut, comme dans
+//!   leur code) ou celui enfermé par la surface (comme dans le texte de l'article) : voir [`Length`] ;
+//! - D* est sans dimension ; leur code la multiplie par 100 pour l'affichage, ce qui ne fait pas partie de
+//!   la méthode et n'est pas repris ici ;
+//! - le signe est conventionnel : avec des normales sortantes, la courbure est positive sur les parties
+//!   convexes et D* positive sur les crêtes, négative au fond des sillons ; changer le signe de la courbure
+//!   change seulement celui de D*.
 
 use surfoxide_core::TriMesh;
 
@@ -41,12 +46,33 @@ pub fn depth_potential(mesh: &TriMesh, mean_curvature: &[f64], alpha: f64) -> Ve
     conjugate_gradient(&a, &rhs, TOLERANCE, 20 * mesh.n_vertices().max(100)).x
 }
 
+/// Volume dont la racine cubique donne la longueur caractéristique L.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Length {
+    /// Volume de l'enveloppe convexe des sommets (code de référence).
+    #[default]
+    ConvexHull,
+    /// Volume enfermé par la surface fermée (texte de l'article).
+    Enclosed,
+}
+
+impl Length {
+    /// Longueur caractéristique de `mesh`, en mm.
+    pub fn of(self, mesh: &TriMesh) -> f64 {
+        match self {
+            Length::ConvexHull => convex_hull_volume(mesh.vertices()),
+            Length::Enclosed => mesh.signed_volume().abs(),
+        }
+        .cbrt()
+    }
+}
+
 /// Profondeur DPF* d'une surface.
 #[derive(Debug, Clone)]
 pub struct DpfStar {
-    /// D*, sans dimension, en pourcentage de la longueur caractéristique (convention du code de référence).
+    /// D*, sans dimension.
     pub depth: Vec<f64>,
-    /// Longueur caractéristique L = (volume de l'enveloppe convexe)^(1/3), en mm.
+    /// Longueur caractéristique L, en mm.
     pub characteristic_length: f64,
     /// Paramètre effectivement utilisé, α_ref / L² (mm⁻²).
     pub alpha: f64,
@@ -55,20 +81,18 @@ pub struct DpfStar {
 impl DpfStar {
     /// Version absolue DPF*_abs = L · D* (équation 14), en mm.
     pub fn absolute(&self) -> Vec<f64> {
-        self.depth
-            .iter()
-            .map(|d| d / 100.0 * self.characteristic_length)
-            .collect()
+        self.depth.iter().map(|d| d * self.characteristic_length).collect()
     }
 }
 
-/// DPF* de `mesh` (fermée, normales sortantes) pour la courbure moyenne `mean_curvature` et `alpha_ref`.
-pub fn dpf_star(mesh: &TriMesh, mean_curvature: &[f64], alpha_ref: f64) -> DpfStar {
-    let l = convex_hull_volume(mesh.vertices()).cbrt();
+/// DPF* de `mesh` (fermée, normales sortantes) pour la courbure moyenne `mean_curvature`, `alpha_ref` et
+/// la longueur caractéristique `length`.
+pub fn dpf_star(mesh: &TriMesh, mean_curvature: &[f64], alpha_ref: f64, length: Length) -> DpfStar {
+    let l = length.of(mesh);
     let alpha = alpha_ref / (l * l);
     let depth = depth_potential(mesh, mean_curvature, alpha)
         .into_iter()
-        .map(|d| 100.0 * d / l)
+        .map(|d| d / l)
         .collect();
     DpfStar {
         depth,
@@ -109,9 +133,9 @@ mod tests {
     fn sphere_profondeur_nulle() {
         let m = icosphere(4, 20.0);
         let k = curvature(&m).mean;
-        let d = dpf_star(&m, &k, ALPHA_REF);
+        let d = dpf_star(&m, &k, ALPHA_REF, Length::ConvexHull);
         assert!(
-            d.depth.iter().all(|x| x.abs() < 1e-2),
+            d.depth.iter().all(|x| x.abs() < 1e-4),
             "max {}",
             d.depth.iter().fold(0.0f64, |a, x| a.max(x.abs()))
         );
@@ -122,18 +146,18 @@ mod tests {
         let m = bosselee(5);
         let reference = {
             let k = curvature(&m).mean;
-            dpf_star(&m, &k, ALPHA_REF)
+            dpf_star(&m, &k, ALPHA_REF, Length::ConvexHull)
         };
         for s in [2.0, 3.0, 5.0, 0.5] {
             let ms = scaled(&m, s);
-            let d = dpf_star(&ms, &curvature(&ms).mean, ALPHA_REF);
+            let d = dpf_star(&ms, &curvature(&ms).mean, ALPHA_REF, Length::ConvexHull);
             assert!((d.characteristic_length / reference.characteristic_length - s).abs() < 1e-9);
             let err = d
                 .depth
                 .iter()
                 .zip(&reference.depth)
                 .fold(0.0f64, |a, (x, y)| a.max((x - y).abs()));
-            assert!(err < 1e-6, "écart {err} à l'échelle {s}");
+            assert!(err < 1e-8, "écart {err} à l'échelle {s}");
             // La DPF brute, elle, n'est pas invariante.
             let raw = depth_potential(&ms, &curvature(&ms).mean, reference.alpha);
             let raw_ref = depth_potential(&m, &curvature(&m).mean, reference.alpha);
@@ -143,11 +167,29 @@ mod tests {
     }
 
     #[test]
+    fn invariance_avec_le_volume_enferme() {
+        let m = bosselee(4);
+        let reference = dpf_star(&m, &curvature(&m).mean, ALPHA_REF, Length::Enclosed);
+        let ms = scaled(&m, 3.0);
+        let d = dpf_star(&ms, &curvature(&ms).mean, ALPHA_REF, Length::Enclosed);
+        assert!((d.characteristic_length / reference.characteristic_length - 3.0).abs() < 1e-9);
+        let err = d
+            .depth
+            .iter()
+            .zip(&reference.depth)
+            .fold(0.0f64, |a, (x, y)| a.max((x - y).abs()));
+        assert!(err < 1e-8, "écart {err}");
+        // Le volume enfermé est plus petit que celui de l'enveloppe : L plus courte.
+        let hull = Length::ConvexHull.of(&m);
+        assert!(reference.characteristic_length < hull);
+    }
+
+    #[test]
     fn signe_cretes_positives_sillons_negatifs() {
         // Tore : l'équateur extérieur est convexe (crête), l'intérieur concave (fond).
         let (big, small) = (10.0, 3.0);
         let m = torus(128, 64, big, small);
-        let d = dpf_star(&m, &curvature(&m).mean, ALPHA_REF);
+        let d = dpf_star(&m, &curvature(&m).mean, ALPHA_REF, Length::ConvexHull);
         for (i, p) in m.vertices().iter().enumerate() {
             let rho = (p[0] * p[0] + p[1] * p[1]).sqrt();
             if p[2].abs() < 1e-9 {
@@ -166,8 +208,8 @@ mod tests {
         // par la subdivision de l'icosphère) doit converger.
         let coarse = bosselee(5);
         let fine = bosselee(6);
-        let dc = dpf_star(&coarse, &curvature(&coarse).mean, ALPHA_REF).depth;
-        let df = dpf_star(&fine, &curvature(&fine).mean, ALPHA_REF).depth;
+        let dc = dpf_star(&coarse, &curvature(&coarse).mean, ALPHA_REF, Length::ConvexHull).depth;
+        let df = dpf_star(&fine, &curvature(&fine).mean, ALPHA_REF, Length::ConvexHull).depth;
         let range = df.iter().cloned().fold(f64::MIN, f64::max) - df.iter().cloned().fold(f64::MAX, f64::min);
         let err = dc.iter().zip(&df).map(|(a, b)| (a - b).abs()).sum::<f64>() / dc.len() as f64;
         assert!(err < 0.02 * range, "écart moyen {err} pour une étendue {range}");
