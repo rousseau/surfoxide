@@ -108,6 +108,31 @@ pub fn vertex_distances(from: &TriMesh, to: &TriMesh) -> Vec<f64> {
         .collect()
 }
 
+/// Dégagement de chaque sommet : distance à la plus proche face de `mesh` qui ne lui est pas incidente.
+///
+/// C'est la grandeur que surveille l'auto-contact point–triangle d'un simulateur comme gyroxide (Tallinen
+/// et al. 2016) : un sommet à moins de la peau répulsive d'une face non incidente subit une force de
+/// contact dès l'état initial. Deux berges d'un sillon presque fermé, ou un pli aigu, ont un faible
+/// dégagement même sans intersection.
+pub fn clearance(mesh: &TriMesh) -> Vec<f64> {
+    let bvh = Bvh::new(mesh);
+    let faces = mesh.faces();
+    mesh.vertices()
+        .par_iter()
+        .enumerate()
+        .map(|(i, &p)| {
+            bvh.nearest(p, |g| {
+                if faces[g as usize].contains(&(i as u32)) {
+                    return f64::INFINITY;
+                }
+                let [a, b, c] = tri(mesh, g);
+                distance::distance2_triangle(p, a, b, c)
+            })
+            .map_or(f64::INFINITY, |(_, d2)| d2.sqrt())
+        })
+        .collect()
+}
+
 /// Indice d'enroulement de la surface fermée `mesh` autour de `p` : 1 à l'intérieur (normales
 /// sortantes), 0 à l'extérieur.
 pub fn winding_number(mesh: &TriMesh, p: Vec3) -> f64 {
@@ -137,6 +162,12 @@ pub struct SurfaceReport {
     pub area: f64,
     pub degenerate_faces: usize,
     pub self_intersections: usize,
+    /// Plus petit dégagement (mm) d'un sommet par rapport aux faces qui ne lui sont pas incidentes
+    /// (voir [`clearance`]) ; informatif, non exigé par `valid`.
+    pub min_clearance: f64,
+    /// Sommets dont le dégagement est sous le cinquième de l'arête moyenne : ils subiraient l'auto-contact
+    /// de gyroxide (peau répulsive 0,2 a) dès l'état initial.
+    pub low_clearance_vertices: usize,
     /// Fermée, 2-variété, orientée vers l'extérieur, d'un seul tenant, de genre 0, sans auto-intersection
     /// ni face dégénérée.
     pub valid: bool,
@@ -154,6 +185,8 @@ pub fn check_surface(mesh: &TriMesh) -> SurfaceReport {
     let self_intersections = self_intersections(mesh).len();
     let signed_volume = mesh.signed_volume();
     let valid = t.is_sphere_like() && signed_volume > 0.0 && self_intersections == 0 && degenerate_faces == 0;
+    let clear = clearance(mesh);
+    let skin = 0.2 * surfoxide_core::adjacency::mean_edge_length(mesh);
     SurfaceReport {
         n_vertices: t.n_vertices,
         n_faces: t.n_faces,
@@ -168,6 +201,8 @@ pub fn check_surface(mesh: &TriMesh) -> SurfaceReport {
         area: mesh.area(),
         degenerate_faces,
         self_intersections,
+        min_clearance: clear.iter().cloned().fold(f64::INFINITY, f64::min),
+        low_clearance_vertices: clear.iter().filter(|&&c| c < skin).count(),
         valid,
     }
 }
@@ -214,6 +249,24 @@ mod tests {
     use super::*;
     use surfoxide_core::shapes::{icosphere, torus};
     use surfoxide_core::vec3;
+
+    #[test]
+    fn degagement_de_deux_spheres_proches() {
+        // Deux sphères de rayon 5 dont les pôles sont à 0,2 mm : dégagement minimal ≈ 0,2 mm.
+        let a = icosphere(3, 5.0);
+        let mut v = a.vertices().to_vec();
+        let mut f = a.faces().to_vec();
+        let n = v.len() as u32;
+        v.extend(a.vertices().iter().map(|p| [p[0], p[1], p[2] + 10.2]));
+        f.extend(a.faces().iter().map(|t| t.map(|i| i + n)));
+        let m = TriMesh::new(v, f).unwrap();
+        let c = clearance(&m);
+        let min = c.iter().cloned().fold(f64::INFINITY, f64::min);
+        assert!((min - 0.2).abs() < 0.05, "{min}");
+        // Une sphère seule : le dégagement est de l'ordre de la hauteur des triangles.
+        let alone = clearance(&a).into_iter().fold(f64::INFINITY, f64::min);
+        assert!(alone > 0.3 * surfoxide_core::adjacency::mean_edge_length(&a), "{alone}");
+    }
 
     #[test]
     fn icosphere_valide() {

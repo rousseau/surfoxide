@@ -47,11 +47,20 @@ multi-BOUNTI-43 (98,4 %) ; HD95 médian 0,17 et 0,19 mm ; épaisseur corticale m
 de courant de Laplace, face médiale exclue) 1,70 et 1,49 mm.
 Comparaison à fetpype (19 sessions) : blanche conforme 46/46 contre 24/38, HD95 0,18 contre 0,40 mm.
 Présentation : https://claude.ai/artifact/DVcshJu5TQaxDFMLKSLWdZ
-Reste en P0 : 7 hémisphères dont la piale ne démarre pas (arêtes vives de la blanche après 28 SA ; les
-modifications du dépliage essayées déplaçaient les échecs sans les réduire), 2 sous le seuil de distance ;
-au fond des sillons, la piale reste en retrait (~5 % des sommets, 0,4 à 0,7 mm, rapporté dans
-`pial_mean_missing`, sans effet sur l'épaisseur) ; essai réel de bout en bout avec gyroxide (sa
-tétraédrisation à partir de nos surfaces, puis mesure ici de sa surface simulée).
+Piale utilisable par gyroxide (octobre 2026) : dégagement imposé entre berges des sillons (`min_clearance`
+= 0,25 × arête moyenne de la blanche ; sans lui, l'auto-contact de gyroxide agit dès l'état initial et la
+simulation diverge) et régularisation tangentielle des triangles (`surfoxide_pial::regularize`, même
+triangulation que la blanche). `surfx check` rapporte `min_clearance`. Validation 7 : contrat inchangé
+(383/386, 378/384) ; ~18 % des sommets de piale retenus (manque moyen 0,45 mm, sans effet sur l'épaisseur) ;
+piale ~2× plus lente. Boucle de bout en bout faite sur une session de 21 SA : `gyroxide/tools/atlas_to_mesh.py`
+(TetGen) sur notre piale + blanche, simulation complète (il faut `--mesh-spacing 0.0136`, le `a` de l'atlas :
+avec l'arête moyenne, divergence vers t ≈ 0,1), relecture et DPF* ici ; la surface simulée a des
+auto-intersections (contact par pénalité), que `surfx check` signale.
+Reste en P0 : 7 hémisphères dont la piale ne démarre pas (arêtes vives de la blanche après 28 SA), 2 sous le
+seuil de distance ; quelques piales héritent d'une blanche déjà serrée (dégagement < 0,1 mm) ; côté gyroxide,
+masque médial lu depuis `_cortex.shape.gii`, sortie GIfTI en mm et pas de temps à dériver de la qualité
+du maillage. Retour du collègue (DPF*) : améliorer l'extraction de la blanche (ondulations millimétriques
+avant 28 SA) ; α_ref à recalibrer pour les fœtus.
 
 P1 : intégrateur ODE dans Burn, réseaux de déformation à la CoSeg (faiblement supervisés par les
 segmentations de medoxide), opérateurs différentiels, métriques (épaisseur, profondeur sulcale,

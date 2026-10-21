@@ -183,7 +183,7 @@ pub fn pial_surface(
     white: &mut WhiteSurface,
     args: &PialArgs,
     min_thickness: f64,
-) -> Result<(surfoxide_pial::Pial, usize, usize), String> {
+) -> Result<(surfoxide_pial::Pial, usize, usize, surfoxide_pial::RegularizeReport), String> {
     // L'objet blanc corrigé prime sur le cortex.
     let cortex = grids.cortex.with_data(
         grids
@@ -215,12 +215,14 @@ pub fn pial_surface(
         stop: args.stop,
         // Marge de 50 % sur le seuil du contrat.
         min_distance: 1.5 * min_thickness,
+        // Peau répulsive de l'auto-contact de gyroxide (0,2 × arête moyenne), avec une marge de 25 %.
+        min_clearance: 0.25 * surfoxide_core::adjacency::mean_edge_length(&white.mesh),
         ..PialParams::default()
     };
     // Si quelques sommets bloquent le départ de la piale, on détend localement la surface blanche
     // (sans intersection) et on réessaie.
     let mut attempt = 0;
-    let pial = loop {
+    let mut pial = loop {
         match pial_from_white(&white.mesh, &field, &params) {
             Ok(p) => break p,
             Err(e) if attempt < 10 && !e.blocked.is_empty() => {
@@ -269,9 +271,24 @@ pub fn pial_surface(
             }
         }
     };
+    // Triangles de la piale : arêtes d'au moins un quart de l'arête moyenne de la blanche, angles d'au
+    // moins 10°, pour que la tétraédrisation (gyroxide) ne crée pas d'éléments dégénérés.
+    let edge = surfoxide_core::adjacency::mean_edge_length(&white.mesh);
+    let reg = surfoxide_pial::regularize(
+        &mut pial.mesh,
+        &white.mesh,
+        &surfoxide_pial::RegularizeParams {
+            min_edge: 0.25 * edge,
+            min_angle: 10.0,
+            min_distance: params.min_distance,
+            min_clearance: params.min_clearance,
+            rings: 2,
+            rounds: 50,
+        },
+    );
     // Distance minimale du contrat : les sommets blancs restés trop près de la piale reculent un peu.
     surfoxide_pial::enforce_min_distance(&mut white.mesh, &pial.mesh, 1.5 * min_thickness, 5);
-    Ok((pial, n_skeleton, iters))
+    Ok((pial, n_skeleton, iters, reg))
 }
 
 /// Recule localement la surface blanche autour des sommets bloquants, de 0,05 mm par anneau.
@@ -386,7 +403,7 @@ pub fn run(
             .map_err(|e| format!("{path}: {e}"))?;
         }
         report["characteristic_length"] = dpf.characteristic_length.into();
-        if let Some(((pial, n_skeleton, iters), secs)) = pial {
+        if let Some(((pial, n_skeleton, iters, reg), secs)) = pial {
             let pial_report = surfoxide_check::check_surface(&pial.mesh);
             let pair = surfoxide_check::check_pair(&w.mesh, &pial.mesh, min_thickness);
             // Épaisseur moyenne sur les seuls sommets corticaux.
@@ -408,6 +425,17 @@ pub fn run(
                 if pial_report.valid && pair.valid { "respecté" } else { "NON RESPECTÉ" },
                 secs
             );
+            println!(
+                "hémisphère {hemi}, piale : régularisation, arêtes courtes {} → {}, triangles aigus {} → {}, arête min {:.3} → {:.3} mm, angle min {:.1}° → {:.1}°",
+                reg.short_edges.0,
+                reg.short_edges.1,
+                reg.sharp_triangles.0,
+                reg.sharp_triangles.1,
+                reg.min_edge.0,
+                reg.min_edge.1,
+                reg.min_angle.0,
+                reg.min_angle.1
+            );
             valid &= pial_report.valid && pair.valid;
             let path = format!("{prefix}_pial.surf.gii");
             surfoxide_io::gifti::write_surface(&path, &pial.mesh, &meta(hemi, "Pial", &labels, seg))
@@ -423,6 +451,10 @@ pub fn run(
             report["pair"] = serde_json::to_value(pair).map_err(|e| e.to_string())?;
             report["pial_held_vertices"] = pial.held.into();
             report["pial_mean_missing"] = pial.mean_missing.into();
+            report["pial_short_edges"] = reg.short_edges.1.into();
+            report["pial_sharp_triangles"] = reg.sharp_triangles.1.into();
+            report["pial_min_edge"] = reg.min_edge.1.into();
+            report["pial_min_angle"] = reg.min_angle.1.into();
             if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
                 let path = format!("{prefix}_missing.shape.gii");
                 surfoxide_io::gifti::write_fields(&path, std::slice::from_ref(&pial.missing), &SurfaceMeta::default())

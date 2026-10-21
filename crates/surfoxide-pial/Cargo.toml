@@ -8,3 +8,4 @@ surfoxide-core = { path = "../surfoxide-core" }
 surfoxide-repair = { path = "../surfoxide-repair" }
 surfoxide-check = { path = "../surfoxide-check" }
 
+rayon = { workspace = true }

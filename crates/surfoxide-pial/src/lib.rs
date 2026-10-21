@@ -12,7 +12,11 @@
 //!    long des lignes de courant ; un pas qui créerait une intersection (avec elle-même ou avec la surface
 //!    blanche) est retenu localement. La piale reste ainsi sans auto-intersection et contient strictement
 //!    la surface blanche, avec la même connectivité.
+//! 5. [`regularize`] : au fond des sillons, les lignes de courant convergent et rapprochent les sommets de
+//!    la piale jusqu'à des arêtes de quelques micromètres. Une relaxation tangentielle locale, sans
+//!    intersection, rend des triangles utilisables par un mailleur volumique (gyroxide).
 
+use rayon::prelude::*;
 use surfoxide_check::bvh::Bvh;
 use surfoxide_check::distance::{closest_point_triangle, distance2_triangle};
 use surfoxide_core::distance::feature_transform;
@@ -152,6 +156,10 @@ pub struct PialParams {
     pub min_distance: f64,
     /// Passes de rattrapage des sommets retenus, après la progression.
     pub catchup_passes: usize,
+    /// Dégagement minimal (mm) entre un sommet de la piale et toute face de la piale qui ne lui est pas
+    /// incidente : les deux berges d'un sillon enfoui restent séparées d'au moins cette distance, sans quoi
+    /// l'auto-contact d'un simulateur (gyroxide) agirait dès l'état initial. 0 : pas de contrainte.
+    pub min_clearance: f64,
 }
 
 impl Default for PialParams {
@@ -164,6 +172,7 @@ impl Default for PialParams {
             flow_steps: 10,
             min_distance: 0.03,
             catchup_passes: 6,
+            min_clearance: 0.1,
         }
     }
 }
@@ -420,6 +429,65 @@ pub fn faces_near(surface: &TriMesh, points: &TriMesh, eps: f64) -> std::collect
     out
 }
 
+/// Dégagement de chaque sommet (distance à la plus proche face non incidente) et cette face.
+fn clearance_with_faces(mesh: &TriMesh) -> Vec<(f64, u32)> {
+    let bvh = Bvh::new(mesh);
+    let (v, f) = (mesh.vertices(), mesh.faces());
+    v.par_iter()
+        .enumerate()
+        .map(|(i, &p)| {
+            bvh.nearest(p, |g| {
+                let t = f[g as usize];
+                if t.contains(&(i as u32)) {
+                    return f64::INFINITY;
+                }
+                distance2_triangle(p, v[t[0] as usize], v[t[1] as usize], v[t[2] as usize])
+            })
+            .map_or((f64::INFINITY, u32::MAX), |(g, d2)| (d2.sqrt(), g))
+        })
+        .collect()
+}
+
+/// Sommets responsables d'un rapprochement : pour chaque sommet dont le dégagement est sous `eps` et plus
+/// petit que `before` (dégagement avant le pas), le sommet et les trois sommets de la face la plus proche.
+/// Un rapprochement présent avant le pas et qui ne s'aggrave pas n'est pas signalé.
+fn close_contacts(mesh: &TriMesh, eps: f64, before: &[f64]) -> std::collections::HashSet<u32> {
+    let mut out = std::collections::HashSet::new();
+    if eps <= 0.0 {
+        return out;
+    }
+    for (i, &(d, g)) in clearance_with_faces(mesh).iter().enumerate() {
+        if d < eps && d < before[i] - 1e-9 {
+            out.insert(i as u32);
+            out.extend(mesh.faces()[g as usize]);
+        }
+    }
+    out
+}
+
+/// Conflits d'un pas de la piale : intersections (avec elle-même ou la blanche), face trop près d'un sommet
+/// blanc, berges trop rapprochées.
+fn pial_conflicts(
+    m: &TriMesh,
+    white: &TriMesh,
+    min_distance: f64,
+    min_clearance: f64,
+    before: &[f64],
+) -> std::collections::HashSet<u32> {
+    let mut bad = conflicting_vertices(m, Some(white));
+    bad.extend(faces_near(m, white, min_distance));
+    bad.extend(close_contacts(m, min_clearance, before));
+    bad
+}
+
+/// Dégagement courant de chaque sommet (infini si la contrainte est désactivée).
+fn clearances(mesh: &TriMesh, eps: f64) -> Vec<f64> {
+    if eps <= 0.0 {
+        return vec![f64::INFINITY; mesh.n_vertices()];
+    }
+    clearance_with_faces(mesh).into_iter().map(|(d, _)| d).collect()
+}
+
 /// Construit la piale à partir de la surface blanche `white` (fermée, sans auto-intersection) et du champ.
 pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> Result<Pial, PialError> {
     // Normales prises dans le cône des normales des faces incidentes : au droit d'un pli, un décalage le
@@ -540,12 +608,11 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
             .map(|i| (t * lengths[i]).max(offset[i]))
             .collect();
         let target: Vec<Vec3> = (0..white.n_vertices()).map(|i| at(i, s[i])).collect();
-        // Un pas est retenu s'il ferait se couper la piale (avec elle-même ou avec la blanche), ou s'il
-        // amènerait une face de la piale trop près d'un sommet blanc.
+        // Un pas est retenu s'il ferait se couper la piale (avec elle-même ou avec la blanche), s'il
+        // amènerait une face de la piale trop près d'un sommet blanc, ou deux berges trop près l'une de l'autre.
+        let before = clearances(&pial, params.min_clearance);
         safe_update_with(&mut pial, &target, |m| {
-            let mut bad = conflicting_vertices(m, Some(white));
-            bad.extend(faces_near(m, white, params.min_distance));
-            bad
+            pial_conflicts(m, white, params.min_distance, params.min_clearance, &before)
         });
         for i in 0..white.n_vertices() {
             if pial.vertices()[i] == target[i] {
@@ -571,10 +638,9 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
             tried[i] = reached[i] + frac[i] * (full[i] - reached[i]);
             target[i] = at(i, tried[i]);
         }
+        let before = clearances(&pial, params.min_clearance);
         safe_update_with(&mut pial, &target, |m| {
-            let mut bad = conflicting_vertices(m, Some(white));
-            bad.extend(faces_near(m, white, params.min_distance));
-            bad
+            pial_conflicts(m, white, params.min_distance, params.min_clearance, &before)
         });
         for &i in &behind {
             if pial.vertices()[i] == target[i] {
@@ -599,6 +665,134 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
         mean_missing,
         missing: VertexField::new("missing", missing),
     })
+}
+
+/// Bilan de [`regularize`] : défauts de la piale avant et après.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegularizeReport {
+    /// Arêtes plus courtes que le seuil, avant puis après.
+    pub short_edges: (usize, usize),
+    /// Triangles dont le plus petit angle est sous le seuil, avant puis après.
+    pub sharp_triangles: (usize, usize),
+    /// Plus courte arête (mm), avant puis après.
+    pub min_edge: (f64, f64),
+    /// Plus petit angle (degrés), avant puis après.
+    pub min_angle: (f64, f64),
+}
+
+/// Sommets des arêtes plus courtes que `min_edge` et des triangles d'angle minimal sous `min_angle`
+/// (degrés) ; rend aussi les compteurs et extrêmes.
+fn pial_defects(mesh: &TriMesh, min_edge: f64, min_angle: f64) -> (Vec<u32>, usize, usize, f64, f64) {
+    let v = mesh.vertices();
+    let mut bad = std::collections::HashSet::new();
+    let (mut n_short, mut n_sharp, mut e_min, mut a_min) = (0, 0, f64::INFINITY, f64::INFINITY);
+    for f in mesh.faces() {
+        let p = f.map(|i| v[i as usize]);
+        let a = surfoxide_check::quality::min_angle(p[0], p[1], p[2]);
+        a_min = a_min.min(a);
+        if a < min_angle {
+            n_sharp += 1;
+            bad.extend(f);
+        }
+        for k in 0..3 {
+            // Chaque arête intérieure est vue deux fois : on ne la compte que dans un sens.
+            let (i, j) = (f[k], f[(k + 1) % 3]);
+            let l = vec3::dist(p[k], p[(k + 1) % 3]);
+            e_min = e_min.min(l);
+            if l < min_edge {
+                bad.extend([i, j]);
+                n_short += (i < j) as usize;
+            }
+        }
+    }
+    (bad.into_iter().collect(), n_short, n_sharp, e_min, a_min)
+}
+
+/// Seuils de [`regularize`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegularizeParams {
+    /// Longueur d'arête minimale (mm).
+    pub min_edge: f64,
+    /// Plus petit angle admis d'un triangle (degrés).
+    pub min_angle: f64,
+    /// Distance minimale (mm) entre une face de la piale et un sommet blanc.
+    pub min_distance: f64,
+    /// Dégagement minimal (mm) entre un sommet de la piale et ses faces non incidentes.
+    pub min_clearance: f64,
+    /// Anneaux de voisins détendus autour des sommets fautifs.
+    pub rings: usize,
+    /// Nombre maximal de passes.
+    pub rounds: usize,
+}
+
+/// Régularise les triangles de la piale par relaxation tangentielle des sommets fautifs (arête plus courte
+/// que `min_edge`, triangle d'angle minimal sous `min_angle`) et de leurs `rings` anneaux, au plus
+/// `rounds` passes. Chaque sommet glisse vers le barycentre de ses voisins dans son plan tangent, ce qui
+/// étale les sommets tassés sans déplacer la surface ; un pas qui créerait une intersection (avec
+/// elle-même ou avec `white`), approcherait une face à moins de `min_distance` d'un sommet blanc ou
+/// réduirait sous `min_clearance` le dégagement d'un sommet est refusé. La connectivité, donc la
+/// correspondance avec la surface blanche, est conservée.
+pub fn regularize(pial: &mut TriMesh, white: &TriMesh, params: &RegularizeParams) -> RegularizeReport {
+    let RegularizeParams {
+        min_edge,
+        min_angle,
+        min_distance,
+        min_clearance,
+        rings,
+        rounds,
+    } = *params;
+    let nb = surfoxide_core::adjacency::vertex_neighbors(pial);
+    let (_, s0, a0, e0, m0) = pial_defects(pial, min_edge, min_angle);
+    // Arrêt quand le nombre de défauts ne baisse plus pendant trois passes (sommets bloqués par les
+    // contraintes) : chaque passe coûte un contrôle complet des intersections.
+    let (mut best, mut stale) = (s0 + a0, 0);
+    for _ in 0..rounds {
+        let (bad, n_short, n_sharp, ..) = pial_defects(pial, min_edge, min_angle);
+        if bad.is_empty() {
+            break;
+        }
+        if n_short + n_sharp < best {
+            (best, stale) = (n_short + n_sharp, 0);
+        } else {
+            stale += 1;
+            if stale >= 3 {
+                break;
+            }
+        }
+        let mut region: std::collections::HashSet<u32> = bad.into_iter().collect();
+        for _ in 0..rings {
+            let more: Vec<u32> = region.iter().flat_map(|&v| nb[v as usize].iter().copied()).collect();
+            region.extend(more);
+        }
+        let normals = surfoxide_core::adjacency::vertex_normals(pial);
+        let v = pial.vertices().to_vec();
+        let mut new = v.clone();
+        for &i in &region {
+            let n = &nb[i as usize];
+            let mean = vec3::scale(
+                n.iter().fold([0.0; 3], |acc, &j| vec3::add(acc, v[j as usize])),
+                1.0 / n.len() as f64,
+            );
+            let d = vec3::sub(mean, v[i as usize]);
+            let nrm = normals[i as usize];
+            let tangential = vec3::sub(d, vec3::scale(nrm, vec3::dot(d, nrm)));
+            new[i as usize] = vec3::add(v[i as usize], vec3::scale(tangential, 0.5));
+        }
+        let before = clearances(pial, min_clearance);
+        let held = safe_update_with(pial, &new, |m| {
+            pial_conflicts(m, white, min_distance, min_clearance, &before)
+        });
+        if held == region.len() {
+            break;
+        }
+    }
+    let (_, s1, a1, e1, m1) = pial_defects(pial, min_edge, min_angle);
+    RegularizeReport {
+        short_edges: (s0, s1),
+        sharp_triangles: (a0, a1),
+        min_edge: (e0, e1),
+        min_angle: (m0, m1),
+    }
 }
 
 #[cfg(test)]
@@ -691,5 +885,38 @@ mod tests {
         assert!(sk.get(14, 4, 5) || sk.get(15, 4, 5), "nappe médiane non détectée");
         assert!(!sk.get(13, 4, 5) && !sk.get(16, 4, 5), "nappe trop épaisse");
         assert!(!sk.get(6, 9, 5), "faux positif sur une couronne");
+    }
+
+    /// Sommets tassés sur une piale sphérique : la régularisation rétablit des arêtes et des angles
+    /// corrects en restant sur la sphère, sans intersection ni rapprochement de la blanche.
+    #[test]
+    fn regularisation_d_une_piale_tassee() {
+        let white = icosphere(3, 5.0);
+        let mut pial = icosphere(3, 8.0);
+        let nb = surfoxide_core::adjacency::vertex_neighbors(&pial);
+        // Chaque sommet d'un échantillon glisse aux 9/10 vers un voisin, puis revient sur la sphère.
+        for v in (0..pial.n_vertices()).step_by(40) {
+            let w = nb[v][0] as usize;
+            let p = vec3::lerp(pial.vertices()[v], pial.vertices()[w], 0.9);
+            pial.vertices_mut()[v] = vec3::scale(vec3::normalize(p), 8.0);
+        }
+        assert!(surfoxide_check::check_surface(&pial).valid);
+        let edge = surfoxide_core::adjacency::mean_edge_length(&pial);
+        let params = RegularizeParams {
+            min_edge: 0.25 * edge,
+            min_angle: 10.0,
+            min_distance: 0.05,
+            min_clearance: 0.2 * edge,
+            rings: 2,
+            rounds: 50,
+        };
+        let r = regularize(&mut pial, &white, &params);
+        assert!(r.short_edges.0 > 0 && r.short_edges.1 == 0, "{r:?}");
+        assert!(r.sharp_triangles.1 < r.sharp_triangles.0, "{r:?}");
+        assert!(surfoxide_check::check_surface(&pial).valid);
+        // Le glissement tangentiel ne s'écarte de la sphère que d'une fraction de l'arête.
+        for p in pial.vertices() {
+            assert!((vec3::norm(*p) - 8.0).abs() < 0.1 * edge, "rayon {}", vec3::norm(*p));
+        }
     }
 }

@@ -5621,6 +5621,7 @@ dependencies = [
 name = "surfoxide-pial"
 version = "0.1.0"
 dependencies = [
+ "rayon",
  "surfoxide-check",
  "surfoxide-core",
  "surfoxide-repair",
