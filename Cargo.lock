@@ -5598,6 +5598,7 @@ dependencies = [
  "ndarray 0.17.2",
  "nifti",
  "quick-xml",
+ "serde_json",
  "surfoxide-core",
 ]
 

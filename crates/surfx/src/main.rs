@@ -7,7 +7,8 @@
 //! - `convert` : convertit une surface d'un format à l'autre (GIfTI, VTP, PLY, STL, FreeSurfer).
 //! - `mask` : masque blanc fermé d'un hémisphère à partir d'une segmentation (multi-)BOUNTI.
 //! - `white` : surface blanche (WM/GM) de genre 0 de chaque hémisphère, en GIfTI.
-//! - `run` : surfaces blanche et piale de chaque hémisphère, épaisseur et rapport de contrat.
+//! - `run` : surfaces blanche et piale de chaque hémisphère, épaisseur et rapport de contrat ; avec `--bids`,
+//!   lit la segmentation de `medx bounti --bids` et écrit les dérivées `surfx-surfaces` (contrat de guioxide).
 //! - `eval` : distance d'une surface à la frontière de la segmentation, qualité du maillage, contrat.
 //! - `check` : contrôle du contrat d'une surface (topologie, auto-intersections) ou d'un couple WM/piale.
 //! - `depth` : courbure moyenne et profondeur sulcale DPF* (invariante d'échelle) d'une surface.
@@ -92,8 +93,9 @@ enum Command {
     },
     /// Surfaces blanche et piale de chaque hémisphère, épaisseur corticale et rapport de contrat
     Run {
-        /// Segmentation NIfTI
-        seg: PathBuf,
+        /// Segmentation NIfTI (hors BIDS)
+        #[arg(required_unless_present = "bids", conflicts_with = "bids")]
+        seg: Option<PathBuf>,
         /// Table de labels : bounti19 ou multibounti43
         #[arg(long, default_value = "bounti19")]
         labels: LabelTable,
@@ -107,9 +109,23 @@ enum Command {
         /// Distance minimale exigée entre surface blanche et piale (mm)
         #[arg(long, default_value_t = 0.02)]
         min_thickness: f64,
-        /// Préfixe des fichiers écrits : <préfixe>_hemi-L_{white,pial}.surf.gii, …
-        #[arg(long, short)]
-        out: PathBuf,
+        /// Préfixe des fichiers écrits : <préfixe>_hemi-L_{white,pial}.surf.gii, … (hors BIDS)
+        #[arg(long, short, required_unless_present = "bids", conflicts_with = "bids")]
+        out: Option<PathBuf>,
+        /// Racine BIDS : entrée derivatives/medx-bounti/…/sub-X[_ses-Y]_desc-bounti_dseg.nii.gz, sorties dans
+        /// derivatives/surfx-surfaces/sub-X[/ses-Y]/anat/ (le parent de la racine si elle s'appelle sourcedata/)
+        #[arg(long, requires = "participant")]
+        bids: Option<PathBuf>,
+        /// Identifiant du participant, sans préfixe `sub-` (avec --bids)
+        #[arg(long, requires = "bids")]
+        participant: Option<String>,
+        /// Identifiant de la session, sans préfixe `ses-` (avec --bids)
+        #[arg(long, requires = "bids")]
+        session: Option<String>,
+        /// Racine de l'étude à utiliser à la place de celle déduite de --bids : les dérivées vont dans
+        /// <dossier>/derivatives/ (avec --bids)
+        #[arg(long, requires = "bids")]
+        output_dir: Option<PathBuf>,
     },
     /// Évalue une surface contre sa segmentation : distances à la frontière, qualité, contrat (JSON)
     Eval {
@@ -255,6 +271,45 @@ fn run_convert(input: &PathBuf, output: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+/// Mode BIDS de `surfx run` : segmentation BOUNTI de la session, préfixe des sorties dans
+/// `derivatives/surfx-surfaces/sub-X[/ses-Y]/anat/`, et `dataset_description.json` du pipeline.
+fn bids_target(
+    root: &std::path::Path,
+    output_dir: Option<&std::path::Path>,
+    participant: &str,
+    session: Option<&str>,
+) -> Result<(PathBuf, PathBuf), String> {
+    use surfoxide_io::bids;
+    let seg = bids::bounti_segmentation(root, output_dir, participant, session).map_err(|e| e.to_string())?;
+    let dir = bids::derivative_dir(root, output_dir, bids::PIPELINE_SURFACES, participant, session)
+        .map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir.anat).map_err(|e| format!("{}: {e}", dir.anat.display()))?;
+    let generator = bids::Generator {
+        name: "surfx run".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
+        commit: option_env!("SURFX_COMMIT").map(str::to_string),
+        command_line: Some(command_line()),
+    };
+    bids::write_derivative_description(&dir.pipeline, bids::PIPELINE_SURFACES, &generator)
+        .map_err(|e| format!("{}: {e}", dir.pipeline.display()))?;
+    println!("segmentation : {}\nsorties : {}", seg.display(), dir.anat.display());
+    Ok((seg, dir.file_prefix()))
+}
+
+/// Ligne de commande telle que lancée (arguments contenant un espace entre apostrophes).
+fn command_line() -> String {
+    std::env::args()
+        .map(|a| {
+            if a.contains(char::is_whitespace) {
+                format!("'{a}'")
+            } else {
+                a
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn run_depth(
     surface: &PathBuf,
     alpha: f64,
@@ -397,9 +452,19 @@ fn main() -> ExitCode {
             pial,
             min_thickness,
             out,
+            bids,
+            participant,
+            session,
+            output_dir,
         } => {
             let hemis = hemi.map_or(Hemisphere::BOTH.to_vec(), |h| vec![h]);
-            white::run(&seg, &labels, &hemis, &params, Some(&pial), min_thickness, &out).and_then(contract)
+            let target = match (&bids, &participant) {
+                (Some(root), Some(p)) => bids_target(root, output_dir.as_deref(), p, session.as_deref()),
+                _ => Ok((seg.expect("exigé par clap"), out.expect("exigé par clap"))),
+            };
+            target.and_then(|(seg, out)| {
+                white::run(&seg, &labels, &hemis, &params, Some(&pial), min_thickness, &out).and_then(contract)
+            })
         }
     };
     match result {

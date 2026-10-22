@@ -7,6 +7,7 @@
 //! - [`ply`], [`stl`] : formats d'échange généraux.
 //! - [`freesurfer`] : surfaces et fichiers « curv » de FreeSurfer.
 //!
+//! - [`bids`] : chemins des dérivées BIDS (`surfx run --bids`) et `dataset_description.json`.
 //! - [`data`] : emplacement des données réelles rapatriées (`scripts/fetch-data.sh`).
 //!
 //! [`read_mesh`] et [`write_mesh`] choisissent le format d'après l'extension.
@@ -16,6 +17,7 @@ use std::path::Path;
 
 use surfoxide_core::TriMesh;
 
+pub mod bids;
 pub mod data;
 pub mod freesurfer;
 pub mod gifti;
