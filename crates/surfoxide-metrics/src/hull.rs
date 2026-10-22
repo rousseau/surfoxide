@@ -149,6 +149,18 @@ pub fn convex_hull(points: &[Vec3]) -> Option<Vec<[u32; 3]>> {
     Some(faces.into_iter().filter(|f| f.alive).map(|f| f.v).collect())
 }
 
+/// Aire de l'enveloppe convexe de `points` (0 si les points sont coplanaires).
+pub fn convex_hull_area(points: &[Vec3]) -> f64 {
+    let Some(faces) = convex_hull(points) else { return 0.0 };
+    faces
+        .iter()
+        .map(|f| {
+            let [a, b, c] = f.map(|i| points[i as usize]);
+            0.5 * vec3::norm(vec3::triangle_normal(a, b, c))
+        })
+        .sum()
+}
+
 /// Volume de l'enveloppe convexe de `points` (0 si les points sont coplanaires).
 pub fn convex_hull_volume(points: &[Vec3]) -> f64 {
     let Some(faces) = convex_hull(points) else { return 0.0 };
@@ -185,6 +197,7 @@ mod tests {
         }
         let faces = convex_hull(&p).unwrap();
         assert!((convex_hull_volume(&p) - 64.0).abs() < 1e-9);
+        assert!((convex_hull_area(&p) - 96.0).abs() < 1e-9);
         let m = TriMesh::new(p.clone(), faces).unwrap();
         // Les sommets inutilisés n'interviennent pas dans les faces : on contrôle les arêtes.
         let r = topology_report(&m);

@@ -5,6 +5,7 @@
 //!   principal.
 //! - [`vtk`] : `.vtp` (PolyData XML) pour ParaView.
 //! - [`ply`], [`stl`] : formats d'échange généraux.
+//! - [`surfqc`] : contrôle des maillages d'une session (`desc-surfqc.tsv`), lu par guioxide.
 //! - [`freesurfer`] : surfaces et fichiers « curv » de FreeSurfer.
 //!
 //! - [`bids`] : chemins des dérivées BIDS (`surfx run --bids`) et `dataset_description.json`.
@@ -24,6 +25,7 @@ pub mod gifti;
 pub mod nifti;
 pub mod ply;
 pub mod stl;
+pub mod surfqc;
 pub mod vtk;
 
 /// Erreur d'entrée-sortie ou de format.

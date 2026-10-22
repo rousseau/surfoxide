@@ -324,6 +324,7 @@ pub fn run(
 ) -> Result<bool, String> {
     let (labels, _) = surfoxide_io::nifti::read_labels(seg).map_err(|e| format!("{}: {e}", seg.display()))?;
     let mut all_valid = true;
+    let mut qc = Vec::new();
     for &hemi in hemis {
         let t = Instant::now();
         let grids = hemisphere_grids(&labels, table, hemi)?;
@@ -393,18 +394,54 @@ pub fn run(
             surfoxide_metrics::depth::ALPHA_REF,
             surfoxide_metrics::Length::ConvexHull,
         );
-        for (name, values) in [("curv", curv.mean), ("dpfstar", dpf.depth)] {
-            let path = format!("{prefix}_white_{name}.shape.gii");
-            surfoxide_io::gifti::write_fields(
-                &path,
-                &[surfoxide_core::VertexField::new(name, values)],
-                &meta(hemi, "GrayWhite", &labels, seg),
-            )
-            .map_err(|e| format!("{path}: {e}"))?;
+        // Champs du contrat de guioxide : courbure moyenne et profondeur sulcale (DPF*), sur la blanche.
+        let mut curv_meta = meta(hemi, "GrayWhite", &labels, seg);
+        curv_meta.other.insert(
+            "Description".into(),
+            "Courbure moyenne (mm^-1) de la surface blanche, tenseur par face (Rusinkiewicz 2004) ; positive sur les parties convexes".into(),
+        );
+        let mut sulc_meta = meta(hemi, "GrayWhite", &labels, seg);
+        sulc_meta.other.insert(
+            "Description".into(),
+            format!(
+                "Profondeur sulcale DPF* (Dieudonné, Auzias, Lefèvre, Comput Biol Med 2026) de la surface blanche, sans dimension ; positive sur les crêtes ; alpha_ref = {}, L = (volume de l'enveloppe convexe)^(1/3) = {:.3} mm",
+                surfoxide_metrics::depth::ALPHA_REF,
+                dpf.characteristic_length
+            ),
+        );
+        sulc_meta.other.insert("SulcalDepthMethod".into(), "DPF*".into());
+        for (name, values, m) in [("curv", curv.mean, &curv_meta), ("sulc", dpf.depth.clone(), &sulc_meta)] {
+            let path = format!("{prefix}_{name}.shape.gii");
+            surfoxide_io::gifti::write_fields(&path, &[surfoxide_core::VertexField::new(name, values)], m)
+                .map_err(|e| format!("{path}: {e}"))?;
         }
+        qc.push(surface_qc(
+            &format!("hemi-{}_white", hemi.bids()),
+            &w.mesh,
+            &white_report,
+            &grids.white,
+        ));
         report["characteristic_length"] = dpf.characteristic_length.into();
         if let Some(((pial, n_skeleton, iters, reg), secs)) = pial {
             let pial_report = surfoxide_check::check_surface(&pial.mesh);
+            // Référence de la piale : substance blanche et cortex, sillons enfouis ouverts par leur nappe
+            // médiane (la piale y entre ; même frontière que `surfx eval --boundary pial-opened`).
+            let skeleton = surfoxide_pial::sulcal_skeleton(&grids.white, &grids.cortex, 1.5);
+            let tissue = grids.white.with_data(
+                grids
+                    .white
+                    .data()
+                    .iter()
+                    .zip(grids.cortex.data().iter().zip(skeleton.data()))
+                    .map(|(&w, (&c, &k))| w || (c && !k))
+                    .collect(),
+            );
+            qc.push(surface_qc(
+                &format!("hemi-{}_pial", hemi.bids()),
+                &pial.mesh,
+                &pial_report,
+                &tissue,
+            ));
             let pair = surfoxide_check::check_pair(&w.mesh, &pial.mesh, min_thickness);
             // Épaisseur moyenne sur les seuls sommets corticaux.
             let th = &pial.thickness.values;
@@ -467,5 +504,30 @@ pub fn run(
         println!("écrit : {prefix}_*");
         all_valid &= valid;
     }
+    let path = format!("{}_desc-surfqc.tsv", out_prefix.display());
+    surfoxide_io::surfqc::write_surfqc(&path, &qc).map_err(|e| format!("{path}: {e}"))?;
+    println!("écrit : {path}");
     Ok(all_valid)
+}
+
+/// Ligne du contrôle des maillages (`desc-surfqc.tsv`) : topologie, auto-intersections, aire, indice de
+/// gyrification (aire / aire de l'enveloppe convexe) et distance moyenne à la frontière de `mask`.
+fn surface_qc(
+    name: &str,
+    mesh: &TriMesh,
+    report: &surfoxide_check::SurfaceReport,
+    mask: &Volume<bool>,
+) -> surfoxide_io::surfqc::SurfQc {
+    let hull = surfoxide_metrics::hull::convex_hull_area(mesh.vertices());
+    let eval = crate::eval::evaluate(mesh, mask);
+    surfoxide_io::surfqc::SurfQc {
+        surface: name.into(),
+        n_vertices: Some(report.n_vertices),
+        n_faces: Some(report.n_faces),
+        euler: Some(report.euler_characteristic),
+        self_intersections: Some(report.self_intersections),
+        area_mm2: Some(report.area),
+        gi: (hull > 0.0).then(|| report.area / hull),
+        mean_dist_to_seg_mm: Some(eval.surface_to_boundary.mean),
+    }
 }

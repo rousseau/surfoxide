@@ -21,7 +21,8 @@ le contrat ci-dessous.
 |---|---|
 | `surfx device` | Vérifie qu'un backend Burn calcule sur la machine (CPU, CUDA ou wgpu) |
 | `surfx selftest` | Construit une icosphère et un tore et affiche leur bilan topologique |
-| `surfx run` | Surfaces blanche et piale de chaque hémisphère, épaisseur corticale et masque du cortex (`.shape.gii`), rapport de contrat JSON |
+| `surfx run` | Surfaces blanche et piale de chaque hémisphère ; champs `thickness`, `curv`, `sulc` (DPF*) et masque du cortex (`.shape.gii`) ; contrôle des maillages `desc-surfqc.tsv` ; rapport de contrat JSON. Avec `--bids`, dérivées `surfx-surfaces` lues par guioxide |
+| `surfx depth` | Courbure moyenne et profondeur sulcale DPF* d'une surface |
 | `surfx white` | Surface blanche de genre 0 de chaque hémisphère (GIfTI) : masque, correction topologique, marching cubes, Taubin, remaillage isotrope, réparation ; rapport de contrat JSON |
 | `surfx eval` | Distance d'une surface à la frontière de la segmentation (Hausdorff 95 %), qualité du maillage, contrat |
 | `surfx check` | Contrôle du contrat : topologie, orientation, auto-intersections ; imbrication et épaisseur WM/piale ; rapport JSON |
@@ -37,6 +38,7 @@ CUDA Toolkit (voir `scripts/setup-linux.sh` pour Ubuntu, `scripts/setup-wsl.sh` 
 cargo test --release
 cargo run --release -- selftest
 cargo run --release -- run sub-01_dseg.nii.gz -o out/sub-01       # WM et piale par hémisphère
+cargo run --release -- run --bids etude/sourcedata --participant 01 --session 1  # dérivées BIDS
 cargo run --release -- device                                   # CPU
 cargo run --release --features cuda -- device --backend cuda    # GPU NVIDIA
 ```
