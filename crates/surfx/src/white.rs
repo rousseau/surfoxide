@@ -410,6 +410,11 @@ pub fn run(
             ),
         );
         sulc_meta.other.insert("SulcalDepthMethod".into(), "DPF*".into());
+        // Signe : celui de l'atlas dHCP et de la DPF* publiée, opposé à FreeSurfer (dont on reprend les noms).
+        let sign =
+            "crêtes gyrales positives, fonds de sillons négatifs (convention de l'atlas dHCP ; opposée à FreeSurfer)";
+        curv_meta.other.insert("SignConvention".into(), sign.into());
+        sulc_meta.other.insert("SignConvention".into(), sign.into());
         for (name, values, m) in [("curv", curv.mean, &curv_meta), ("sulc", dpf.depth.clone(), &sulc_meta)] {
             let path = format!("{prefix}_{name}.shape.gii");
             surfoxide_io::gifti::write_fields(&path, &[surfoxide_core::VertexField::new(name, values)], m)

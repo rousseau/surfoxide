@@ -21,7 +21,7 @@ le contrat ci-dessous.
 |---|---|
 | `surfx device` | Vérifie qu'un backend Burn calcule sur la machine (CPU, CUDA ou wgpu) |
 | `surfx selftest` | Construit une icosphère et un tore et affiche leur bilan topologique |
-| `surfx run` | Surfaces blanche et piale de chaque hémisphère ; champs `thickness`, `curv`, `sulc` (DPF*) et masque du cortex (`.shape.gii`) ; contrôle des maillages `desc-surfqc.tsv` ; rapport de contrat JSON. Avec `--bids`, dérivées `surfx-surfaces` lues par guioxide |
+| `surfx run` | Surfaces blanche et piale de chaque hémisphère ; champs `thickness`, `curv`, `sulc` (DPF*, crêtes positives comme l'atlas dHCP, à l'inverse de FreeSurfer) et masque du cortex (`.shape.gii`) ; contrôle des maillages `desc-surfqc.tsv` ; rapport de contrat JSON. Avec `--bids`, dérivées `surfx-surfaces` lues par guioxide |
 | `surfx depth` | Courbure moyenne et profondeur sulcale DPF* d'une surface |
 | `surfx white` | Surface blanche de genre 0 de chaque hémisphère (GIfTI) : masque, correction topologique, marching cubes, Taubin, remaillage isotrope, réparation ; rapport de contrat JSON |
 | `surfx eval` | Distance d'une surface à la frontière de la segmentation (Hausdorff 95 %), qualité du maillage, contrat |
