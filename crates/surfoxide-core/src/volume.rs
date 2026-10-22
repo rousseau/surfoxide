@@ -135,6 +135,33 @@ impl<T: Copy> Volume<T> {
     }
 }
 
+impl Volume<f64> {
+    /// Interpolation trilinéaire au point de coordonnées voxel continues `q` (bords répliqués).
+    pub fn trilinear(&self, q: Vec3) -> f64 {
+        let dims = self.dims;
+        let mut base = [0usize; 3];
+        let mut t = [0.0; 3];
+        for a in 0..3 {
+            let x = q[a].clamp(0.0, (dims[a] - 1) as f64);
+            let i = (x.floor() as usize).min(dims[a].saturating_sub(2));
+            base[a] = i;
+            t[a] = (x - i as f64).min(1.0);
+        }
+        let mut acc = 0.0;
+        for c in 0..8 {
+            let o = [c & 1, (c >> 1) & 1, (c >> 2) & 1];
+            let idx = self.index(
+                (base[0] + o[0]).min(dims[0] - 1),
+                (base[1] + o[1]).min(dims[1] - 1),
+                (base[2] + o[2]).min(dims[2] - 1),
+            );
+            let w: f64 = (0..3).map(|a| if o[a] == 1 { t[a] } else { 1.0 - t[a] }).product();
+            acc += w * self.data[idx];
+        }
+        acc
+    }
+}
+
 /// Applique l'affine `a` au point `p`.
 pub fn apply_affine(a: &Affine, p: Vec3) -> Vec3 {
     std::array::from_fn(|r| a[r][0] * p[0] + a[r][1] * p[1] + a[r][2] * p[2] + a[r][3])
@@ -195,6 +222,22 @@ mod tests {
         let idx = v.index(3, 2, 5);
         assert_eq!(v.coords(idx), [3, 2, 5]);
         assert_eq!(v.len(), 120);
+    }
+
+    #[test]
+    fn interpolation_trilineaire_exacte_sur_une_fonction_affine() {
+        let mut v = Volume::filled([4, 5, 6], 0.0, IDENTITY);
+        for k in 0..6 {
+            for j in 0..5 {
+                for i in 0..4 {
+                    v.set(i, j, k, 1.0 + 2.0 * i as f64 - j as f64 + 0.5 * k as f64);
+                }
+            }
+        }
+        let q = [1.25, 3.5, 4.75];
+        assert!((v.trilinear(q) - (1.0 + 2.5 - 3.5 + 2.375)).abs() < 1e-12);
+        // Hors du volume : valeur du bord.
+        assert!((v.trilinear([-1.0, 0.0, 0.0]) - 1.0).abs() < 1e-12);
     }
 
     #[test]
