@@ -23,6 +23,7 @@ le contrat ci-dessous.
 | `surfx selftest` | Construit une icosphère et un tore et affiche leur bilan topologique |
 | `surfx run` | Surfaces blanche et piale de chaque hémisphère ; champs `thickness`, `curv`, `sulc` (DPF*, crêtes positives comme l'atlas dHCP, à l'inverse de FreeSurfer) et masque du cortex (`.shape.gii`) ; contrôle des maillages `desc-surfqc.tsv` ; rapport de contrat JSON. Avec `--bids`, dérivées `surfx-surfaces` lues par guioxide |
 | `surfx depth` | Courbure moyenne et profondeur sulcale DPF* d'une surface |
+| `surfx dataset` | Exemple d'entraînement d'un hémisphère (P1) : classes de tissu, distance signée, blanche et piale |
 | `surfx white` | Surface blanche de genre 0 de chaque hémisphère (GIfTI) : masque, correction topologique, marching cubes, Taubin, remaillage isotrope, réparation ; rapport de contrat JSON |
 | `surfx eval` | Distance d'une surface à la frontière de la segmentation (Hausdorff 95 %), qualité du maillage, contrat |
 | `surfx check` | Contrôle du contrat : topologie, orientation, auto-intersections ; imbrication et épaisseur WM/piale ; rapport JSON |
@@ -67,6 +68,7 @@ scripts/
   setup-linux.sh    préparation d'une machine Ubuntu avec GPU NVIDIA
   fetch-data.sh     rapatrie les segmentations (et T2w) depuis Garage dans $SURFOXIDE_DATA
   validate.py       validation sur la cohorte et comparaison à fetpype
+  dataset.py        jeu d'entraînement des réseaux de déformation à partir d'une validation (P1)
   illustrate.py     figure T2w, segmentation et surfaces pour quelques âges (numpy, nibabel, matplotlib)
   plate.py          planche de toutes les surfaces d'un dossier, de la plus jeune à la plus âgée
   setup-wsl.sh      préparation d'une machine WSL avec GPU NVIDIA

@@ -11,8 +11,10 @@
 //!   lit la segmentation de `medx bounti --bids` et écrit les dérivées `surfx-surfaces` (contrat de guioxide).
 //! - `eval` : distance d'une surface à la frontière de la segmentation, qualité du maillage, contrat.
 //! - `check` : contrôle du contrat d'une surface (topologie, auto-intersections) ou d'un couple WM/piale.
+//! - `dataset` : exemple d'entraînement d'un hémisphère pour les réseaux de déformation (P1).
 //! - `depth` : courbure moyenne et profondeur sulcale DPF* (invariante d'échelle) d'une surface.
 
+mod dataset;
 mod eval;
 mod white;
 
@@ -159,6 +161,26 @@ enum Command {
         /// Rapport JSON écrit dans ce fichier (sinon sur la sortie standard)
         #[arg(long)]
         json: Option<PathBuf>,
+    },
+    /// Exemple d'entraînement d'un hémisphère (P1) : classes de tissu, distance signée, blanche et piale
+    Dataset {
+        /// Segmentation NIfTI
+        seg: PathBuf,
+        /// Table de labels : bounti19 ou multibounti43
+        #[arg(long, default_value = "bounti19")]
+        labels: LabelTable,
+        /// Hémisphère : L ou R
+        #[arg(long)]
+        hemi: Hemisphere,
+        /// Surface blanche (GIfTI)
+        #[arg(long)]
+        white: PathBuf,
+        /// Surface piale de même triangulation (GIfTI)
+        #[arg(long)]
+        pial: PathBuf,
+        /// Préfixe des fichiers écrits : <préfixe>_{classes,sdf}.nii.gz, <préfixe>_{white,pial}.surf.gii
+        #[arg(long, short)]
+        out: PathBuf,
     },
     /// Courbure moyenne et profondeur sulcale DPF* d'une surface fermée
     Depth {
@@ -408,6 +430,14 @@ fn main() -> ExitCode {
         }
         Command::Convert { input, output } => run_convert(&input, &output),
         Command::Mask { seg, labels, hemi, out } => run_mask(&seg, &labels, hemi, &out),
+        Command::Dataset {
+            seg,
+            labels,
+            hemi,
+            white,
+            pial,
+            out,
+        } => dataset::run(&seg, &labels, hemi, &white, &pial, &out),
         Command::Depth {
             surface,
             alpha,

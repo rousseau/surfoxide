@@ -92,6 +92,12 @@ sérialisé sur CUDA (~100 ms par appel). Temps GPU : `cargo test --release -p s
 Jalon 2 — fait (`surfoxide-ode`) : Euler et RK4 à pas fixe sur `[N, 3]`, rétropropagation à travers les pas ;
 ordres de convergence vérifiés (1 et 4), gradient exact sur une dilatation, icosphère déformée restée valide.
 Sur la 2080 Ti : 121 000 sommets, 10 pas RK4 dans un champ échantillonné, passe avant + arrière 2,25 s, 2,6 Go.
+Jalon 3 — fait (`surfx dataset`, `scripts/dataset.py`) : 761 hémisphères conformes de la validation 7 (deux tables
+de labels) dans `~/scratch/surfoxide-dataset` (5,2 Go, hors Git ; `index.tsv` : 455 entraînement, 143
+validation, 163 test, folds par sujet). Par exemple : classes `u8` sur le cadrage de l'hémisphère à 0,5 mm
+(0 fond, 1 cortex, 2 substance blanche fermée, 3 nappe médiane des sillons enfouis), distance signée `f32` aux
+faces des voxels de la frontière à sillons ouverts (corrigée d'un demi-voxel), blanche et piale de même
+triangulation. Contrôle : blanche à −1,0 à −1,6 mm, piale à +0,14 à +0,20 mm de cette frontière (médianes).
 Profondeur sulcale — fait (`surfoxide-metrics`, `surfx depth`, écrite par `surfx run` sur la blanche) : DPF*
 (Dieudonné, Auzias, Lefèvre, Comput Biol Med 2026), pas le `sulc` de FreeSurfer (dépendant de la taille).
 Choix confirmés par les auteurs (code : github.com/maximedieudonne/DPF-star) : système (S/2 + αB) D = 2B(K − K̄)
