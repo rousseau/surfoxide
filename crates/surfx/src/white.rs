@@ -1,7 +1,8 @@
 //! Surfaces d'un hémisphère.
 //!
-//! Blanche : masque → distance signée → correction topologique → marching cubes → lissage de Taubin (pas à
-//! pas, sans créer d'intersection) → remaillage isotrope → réparation locale des intersections restantes.
+//! Blanche : masque → distance signée → correction topologique → marching cubes → lissage laplacien contraint
+//! à une bande d'un voxel autour de la frontière de l'objet (pas à pas, sans créer d'intersection) →
+//! remaillage isotrope → réparation locale des intersections restantes.
 //!
 //! Piale : champ de Laplace sur le cortex (sillons enfouis ouverts par leur nappe médiane) → lignes de
 //! courant depuis la surface blanche → progression de la piale sans intersection.
@@ -23,12 +24,22 @@ pub struct WhiteParams {
     /// Écart-type (mm) du flou de la distance signée avant extraction
     #[arg(long, default_value_t = 0.25)]
     pub sigma: f64,
-    /// Nombre de paires de pas de Taubin
-    #[arg(long, default_value_t = 10)]
+    /// Nombre de pas de lissage (paires λ, μ de Taubin)
+    #[arg(long, default_value_t = 50)]
     pub taubin: usize,
-    /// Pas λ de Taubin (le pas μ vaut −1,06 λ)
+    /// Pas λ de Taubin (le pas μ vaut −mu_ratio · λ)
     #[arg(long, default_value_t = 0.5)]
     pub lambda: f64,
+    /// Rapport −μ/λ des pas de Taubin ; 0 : lissage laplacien pur (rétrécissement retenu par la bande)
+    #[arg(long, default_value_t = 0.0)]
+    pub mu_ratio: f64,
+    /// Demi-largeur de la bande où le lissage garde les sommets, en fraction du voxel : |φ| ≤ band · h autour
+    /// de la frontière de l'objet blanc corrigé (aucun centre de voxel ne change de côté) ; 0 : lissage libre
+    #[arg(long, default_value_t = 0.8)]
+    pub band: f64,
+    /// Pas de lissage laplacien contraint à la bande, après le remaillage (sur le maillage isotrope)
+    #[arg(long, default_value_t = 0)]
+    pub post_smooth: usize,
     /// Longueur d'arête visée par le remaillage isotrope (mm) ; 0 : pas de remaillage
     #[arg(long, default_value_t = 0.5)]
     pub edge: f64,
@@ -91,12 +102,21 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     // d'au moins 0,2 voxel, où la piale peut passer.
     let mut mesh = surfoxide_extract::marching_cubes(&c.levelset, 0.2);
     debug_topology("marching cubes", &mesh);
-    // Lissage pas à pas : un pas qui ferait se couper la surface est annulé localement.
+    // Lissage pas à pas : un pas qui ferait se couper la surface est annulé localement. Avec une bande, les
+    // sommets restent entre les centres des voxels de part et d'autre de la frontière de l'objet corrigé.
+    let phi0 = (params.band > 0.0).then(|| signed_distance(&c.object));
     let mut held = 0;
     for _ in 0..params.taubin {
-        let mut trial = mesh.clone();
-        surfoxide_extract::taubin(&mut trial, 1, params.lambda, -1.06 * params.lambda);
-        held += surfoxide_repair::safe_update(&mut mesh, trial.vertices());
+        let (lambda, mu) = (params.lambda, -params.mu_ratio * params.lambda);
+        let trial = match &phi0 {
+            Some(phi0) => surfoxide_extract::constrained_taubin(&mesh, phi0, params.band * min_spacing, lambda, mu),
+            None => {
+                let mut t = mesh.clone();
+                surfoxide_extract::taubin(&mut t, 1, lambda, mu);
+                t.vertices().to_vec()
+            }
+        };
+        held += surfoxide_repair::safe_update(&mut mesh, &trial);
     }
     debug_topology("Taubin", &mesh);
     let smoothed = mesh.clone();
@@ -114,6 +134,17 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     if remesh_dropped {
         mesh = smoothed;
         repair.remaining = 0;
+    }
+    // Lissage laplacien contraint à la bande, sur le maillage isotrope : efface les marches d'escalier sans
+    // que le remaillage ne replie ensuite les crêtes amincies.
+    if params.post_smooth > 0 {
+        let phi = phi0.clone().unwrap_or_else(|| signed_distance(&c.object));
+        let band = params.band.max(0.8) * min_spacing;
+        for _ in 0..params.post_smooth {
+            let trial = surfoxide_extract::constrained_taubin(&mesh, &phi, band, params.lambda, 0.0);
+            held += surfoxide_repair::safe_update(&mut mesh, &trial);
+        }
+        debug_topology("lissage contraint après remaillage", &mesh);
     }
     // Amas de micro-triangles, puis plis aigus : gênent le décalage de la piale et trahissent un artefact
     // local.

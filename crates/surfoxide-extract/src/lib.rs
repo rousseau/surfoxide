@@ -8,4 +8,4 @@ pub mod marching_cubes;
 pub mod smooth;
 
 pub use marching_cubes::marching_cubes;
-pub use smooth::taubin;
+pub use smooth::{constrained_taubin, taubin};
