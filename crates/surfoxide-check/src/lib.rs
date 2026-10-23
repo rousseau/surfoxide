@@ -74,6 +74,82 @@ pub fn self_intersections(mesh: &TriMesh) -> Vec<(u32, u32)> {
         .collect()
 }
 
+/// Comme [`self_intersections`], restreint aux paires dont une face au moins est dans `faces` : de quoi
+/// recontrôler une surface après n'avoir déplacé que quelques sommets. Paires (min, max) sans doublon.
+pub fn self_intersections_among(mesh: &TriMesh, faces: &[u32]) -> Vec<(u32, u32)> {
+    let bvh = Bvh::new(mesh);
+    let mut out: Vec<(u32, u32)> = faces
+        .par_iter()
+        .flat_map_iter(|&f| {
+            let mut out = Vec::new();
+            let bbox = *bvh.face_box(f);
+            bvh.query_box(&bbox, |g| {
+                if g != f && faces_conflict(mesh, f, g) {
+                    out.push((f.min(g), f.max(g)));
+                }
+            });
+            out
+        })
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// Comme [`cross_intersections`], restreint aux faces `faces_a` de `a`.
+pub fn cross_intersections_among(a: &TriMesh, b: &TriMesh, faces_a: &[u32]) -> Vec<(u32, u32)> {
+    let bvh = Bvh::new(b);
+    faces_a
+        .par_iter()
+        .flat_map_iter(|&f| {
+            let mut out = Vec::new();
+            let t = tri(a, f);
+            let bbox = bvh::Aabb::of_points(&t);
+            bvh.query_box(&bbox, |g| {
+                if triangles_intersect(t, tri(b, g)) {
+                    out.push((f, g));
+                }
+            });
+            out
+        })
+        .collect()
+}
+
+/// Grille uniforme sur des points : retrouve vite les points d'une boîte.
+pub struct PointGrid {
+    cell: f64,
+    cells: std::collections::HashMap<[i64; 3], Vec<u32>>,
+}
+
+impl PointGrid {
+    /// Grille de pas `cell` (mm) sur `points`.
+    pub fn new(points: &[Vec3], cell: f64) -> Self {
+        let mut cells: std::collections::HashMap<[i64; 3], Vec<u32>> = std::collections::HashMap::new();
+        for (i, p) in points.iter().enumerate() {
+            cells.entry(Self::key(*p, cell)).or_default().push(i as u32);
+        }
+        PointGrid { cell, cells }
+    }
+
+    fn key(p: Vec3, cell: f64) -> [i64; 3] {
+        p.map(|x| (x / cell).floor() as i64)
+    }
+
+    /// Appelle `visit` pour chaque point dont la cellule rencontre la boîte [`lo`, `hi`].
+    pub fn visit_box(&self, lo: Vec3, hi: Vec3, mut visit: impl FnMut(u32)) {
+        let (a, b) = (Self::key(lo, self.cell), Self::key(hi, self.cell));
+        for x in a[0]..=b[0] {
+            for y in a[1]..=b[1] {
+                for z in a[2]..=b[2] {
+                    if let Some(list) = self.cells.get(&[x, y, z]) {
+                        list.iter().for_each(|&i| visit(i));
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Paires (face de `a`, face de `b`) qui se coupent ; les deux maillages n'ont aucun sommet commun.
 pub fn cross_intersections(a: &TriMesh, b: &TriMesh) -> Vec<(u32, u32)> {
     let bvh = Bvh::new(b);
@@ -266,6 +342,46 @@ mod tests {
         // Une sphère seule : le dégagement est de l'ordre de la hauteur des triangles.
         let alone = clearance(&a).into_iter().fold(f64::INFINITY, f64::min);
         assert!(alone > 0.3 * surfoxide_core::adjacency::mean_edge_length(&a), "{alone}");
+    }
+
+    #[test]
+    fn controles_restreints_equivalents_aux_controles_complets() {
+        // Sphère dont on enfonce un sommet à travers la surface : les paires trouvées en ne regardant que les
+        // faces de ce sommet sont celles du contrôle complet qui le concernent.
+        let mut m = icosphere(3, 10.0);
+        let p = m.vertices()[5];
+        m.vertices_mut()[5] = vec3::scale(p, -1.2);
+        let all = self_intersections(&m);
+        assert!(!all.is_empty());
+        let faces: Vec<u32> = (0..m.n_faces() as u32)
+            .filter(|&f| m.faces()[f as usize].contains(&5))
+            .collect();
+        let among = self_intersections_among(&m, &faces);
+        let mut expected: Vec<(u32, u32)> = all
+            .iter()
+            .copied()
+            .filter(|(f, g)| faces.contains(f) || faces.contains(g))
+            .collect();
+        expected.sort_unstable();
+        assert_eq!(among, expected);
+        let other = icosphere(2, 9.5);
+        let cross = cross_intersections(&m, &other);
+        let cross_among = cross_intersections_among(&m, &other, &faces);
+        let mut expected: Vec<(u32, u32)> = cross.iter().copied().filter(|(f, _)| faces.contains(f)).collect();
+        expected.sort_unstable();
+        let mut got = cross_among.clone();
+        got.sort_unstable();
+        assert_eq!(got, expected);
+        // Grille : tous les sommets d'une boîte, et seulement ceux des cellules qu'elle touche.
+        let grid = PointGrid::new(m.vertices(), 1.0);
+        let (lo, hi) = ([-3.0, -3.0, 5.0], [3.0, 3.0, 11.0]);
+        let mut seen = Vec::new();
+        grid.visit_box(lo, hi, |i| seen.push(i));
+        for (i, q) in m.vertices().iter().enumerate() {
+            if (0..3).all(|a| q[a] >= lo[a] && q[a] <= hi[a]) {
+                assert!(seen.contains(&(i as u32)), "sommet {i} manqué");
+            }
+        }
     }
 
     #[test]

@@ -11,7 +11,7 @@
 
 use std::collections::HashSet;
 
-use surfoxide_check::{cross_intersections, self_intersections};
+use surfoxide_check::{cross_intersections, cross_intersections_among, self_intersections, self_intersections_among};
 use surfoxide_core::adjacency::vertex_neighbors;
 use surfoxide_core::vec3::{self, Vec3};
 use surfoxide_core::TriMesh;
@@ -23,6 +23,35 @@ pub fn intersecting_vertices(mesh: &TriMesh) -> HashSet<u32> {
         .into_iter()
         .flat_map(|(f, g)| faces[f as usize].into_iter().chain(faces[g as usize]))
         .collect()
+}
+
+/// Faces à recontrôler après avoir ramené des sommets, et déplacement maximal de ces sommets (mm) : un contrôle
+/// de proximité doit regarder les points qui étaient près de ces faces avant le retour, à `margin` près.
+#[derive(Debug, Clone)]
+pub struct Region {
+    pub faces: Vec<u32>,
+    pub margin: f64,
+}
+
+/// Comme [`conflicting_vertices`], restreint aux paires dont une face de `mesh` est dans la région (toutes
+/// les faces si `None`).
+pub fn conflicting_vertices_among(mesh: &TriMesh, obstacle: Option<&TriMesh>, region: Option<&Region>) -> HashSet<u32> {
+    let Some(Region { faces: region, .. }) = region else {
+        return conflicting_vertices(mesh, obstacle);
+    };
+    let f = mesh.faces();
+    let mut bad: HashSet<u32> = self_intersections_among(mesh, region)
+        .into_iter()
+        .flat_map(|(a, b)| f[a as usize].into_iter().chain(f[b as usize]))
+        .collect();
+    if let Some(o) = obstacle {
+        bad.extend(
+            cross_intersections_among(mesh, o, region)
+                .into_iter()
+                .flat_map(|(a, _)| f[a as usize]),
+        );
+    }
+    bad
 }
 
 /// Sommets des faces de `mesh` qui se coupent entre elles ou qui coupent `obstacle`.
@@ -48,30 +77,48 @@ pub fn safe_update(mesh: &mut TriMesh, new: &[Vec3]) -> usize {
 /// Comme [`safe_update`], en interdisant aussi toute intersection avec `obstacle` (que `mesh` ne doit pas
 /// couper au départ).
 pub fn safe_update_against(mesh: &mut TriMesh, new: &[Vec3], obstacle: Option<&TriMesh>) -> usize {
-    safe_update_with(mesh, new, |m| conflicting_vertices(m, obstacle))
+    safe_update_with(mesh, new, |m, faces| conflicting_vertices_among(m, obstacle, faces))
 }
 
 /// Applique les nouvelles positions `new`, puis ramène à leur ancienne position, de proche en proche, les
 /// sommets déplacés que `conflicts` signale, jusqu'à ce qu'aucun sommet déplacé ne soit en conflit. Les
 /// conflits qui ne touchent que des sommets immobiles existaient déjà : ils sont laissés tels quels, ce qui
 /// garantit la terminaison. Rend le nombre de sommets maintenus.
-pub fn safe_update_with(mesh: &mut TriMesh, new: &[Vec3], conflicts: impl Fn(&TriMesh) -> HashSet<u32>) -> usize {
+///
+/// `conflicts(m, region)` rend les sommets en conflit : sur toute la surface si `region` vaut `None` (premier
+/// contrôle), sinon seulement les conflits qui touchent une face de la région. Après le premier contrôle, seuls
+/// les sommets ramenés ont bougé : un conflit nouveau ou persistant touche forcément une de leurs faces, et
+/// le contrôle restreint suffit (même résultat qu'un contrôle complet, en bien moins de temps).
+pub fn safe_update_with(
+    mesh: &mut TriMesh,
+    new: &[Vec3],
+    conflicts: impl Fn(&TriMesh, Option<&Region>) -> HashSet<u32>,
+) -> usize {
     assert_eq!(new.len(), mesh.n_vertices());
     let old = mesh.vertices().to_vec();
     mesh.vertices_mut().copy_from_slice(new);
+    let vf = surfoxide_core::adjacency::vertex_faces(mesh);
     let mut held: HashSet<u32> = HashSet::new();
+    let mut region: Option<Region> = None;
     loop {
-        let fresh: Vec<u32> = conflicts(mesh)
+        let fresh: Vec<u32> = conflicts(mesh, region.as_ref())
             .into_iter()
             .filter(|&v| !held.contains(&v) && old[v as usize] != new[v as usize])
             .collect();
         if fresh.is_empty() {
             return held.len();
         }
+        let mut faces: Vec<u32> = Vec::new();
+        let mut margin: f64 = 0.0;
         for v in fresh {
+            margin = margin.max(vec3::dist(old[v as usize], new[v as usize]));
             mesh.vertices_mut()[v as usize] = old[v as usize];
             held.insert(v);
+            faces.extend(&vf[v as usize]);
         }
+        faces.sort_unstable();
+        faces.dedup();
+        region = Some(Region { faces, margin });
     }
 }
 

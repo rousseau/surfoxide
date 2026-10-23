@@ -23,7 +23,7 @@ use surfoxide_core::distance::feature_transform;
 use surfoxide_core::vec3::{self, Vec3};
 use surfoxide_core::volume::invert_affine;
 use surfoxide_core::{Affine, TriMesh, VertexField, Volume};
-use surfoxide_repair::{cone_direction, conflicting_vertices, safe_update_with};
+use surfoxide_repair::{cone_direction, conflicting_vertices, conflicting_vertices_among, safe_update_with, Region};
 
 /// Voxels du cortex sur la nappe médiane d'un sillon enfoui : le voxel blanc le plus proche diffère d'un
 /// voisin à l'autre de plus de `max(3 h, ratio · d)` (h : plus grande taille de voxel, d : distance au
@@ -366,7 +366,7 @@ pub fn shrink_white(white: &mut TriMesh, seeds: &[u32], rings: usize, depth: f64
     for &v in &region {
         new[v as usize] = vec3::sub(new[v as usize], vec3::scale(normals[v as usize], depth));
     }
-    safe_update_with(white, &new, |m| conflicting_vertices(m, pial))
+    safe_update_with(white, &new, |m, f| conflicting_vertices_among(m, pial, f))
 }
 
 /// Garantit, autant que possible, une distance d'au moins `eps` entre chaque sommet blanc et la piale, en
@@ -405,7 +405,7 @@ pub fn enforce_min_distance(white: &mut TriMesh, pial: &TriMesh, eps: f64, round
             let away = vec3::normalize(vec3::sub(p, q));
             new[i as usize] = vec3::add(p, vec3::scale(away, missing + 0.2 * eps));
         }
-        safe_update_with(white, &new, |m| conflicting_vertices(m, Some(pial)));
+        safe_update_with(white, &new, |m, f| conflicting_vertices_among(m, Some(pial), f));
     }
     close.len()
 }
@@ -466,18 +466,111 @@ fn close_contacts(mesh: &TriMesh, eps: f64, before: &[f64]) -> std::collections:
 }
 
 /// Conflits d'un pas de la piale : intersections (avec elle-même ou la blanche), face trop près d'un sommet
-/// blanc, berges trop rapprochées.
+/// blanc, berges trop rapprochées. Avec `faces`, seulement les conflits qui touchent ces faces (voir
+/// [`safe_update_with`]).
 fn pial_conflicts(
     m: &TriMesh,
     white: &TriMesh,
     min_distance: f64,
     min_clearance: f64,
     before: &[f64],
+    region: Option<&Region>,
 ) -> std::collections::HashSet<u32> {
-    let mut bad = conflicting_vertices(m, Some(white));
-    bad.extend(faces_near(m, white, min_distance));
-    bad.extend(close_contacts(m, min_clearance, before));
+    let mut bad = conflicting_vertices_among(m, Some(white), region);
+    match region {
+        None => {
+            bad.extend(faces_near(m, white, min_distance));
+            bad.extend(close_contacts(m, min_clearance, before));
+        }
+        Some(r) => {
+            bad.extend(faces_near_among(m, white, min_distance, r));
+            bad.extend(close_contacts_among(m, min_clearance, before, r));
+        }
+    }
     bad
+}
+
+/// Pas de la grille des points pour les contrôles restreints (mm).
+const GRID_CELL: f64 = 1.0;
+
+/// Boîte de la face `f` de `mesh`, élargie de `eps`.
+fn face_box(mesh: &TriMesh, f: u32, eps: f64) -> (Vec3, Vec3, [Vec3; 3]) {
+    let t = mesh.faces()[f as usize].map(|i| mesh.vertices()[i as usize]);
+    let lo = std::array::from_fn(|a| t.iter().map(|p| p[a]).fold(f64::INFINITY, f64::min) - eps);
+    let hi = std::array::from_fn(|a| t.iter().map(|p| p[a]).fold(f64::NEG_INFINITY, f64::max) + eps);
+    (lo, hi, t)
+}
+
+/// Comme [`faces_near`], restreint aux sommets de `points` dont la face la plus proche a pu changer quand
+/// seules les faces de la région ont bougé : ceux qui en sont à moins de `eps` (avant ou après le retour, d'où
+/// la marge). Même
+/// règle que [`faces_near`] : pour chacun, la face la plus proche de toute la surface, si elle est à moins
+/// de `eps`.
+fn faces_near_among(surface: &TriMesh, points: &TriMesh, eps: f64, region: &Region) -> std::collections::HashSet<u32> {
+    let grid = surfoxide_check::PointGrid::new(points.vertices(), GRID_CELL);
+    let mut candidates: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    for &f in &region.faces {
+        let (lo, hi, _) = face_box(surface, f, eps + region.margin);
+        grid.visit_box(lo, hi, |i| {
+            candidates.insert(i);
+        });
+    }
+    let mut out = std::collections::HashSet::new();
+    if candidates.is_empty() {
+        return out;
+    }
+    let bvh = Bvh::new(surface);
+    let (v, f) = (surface.vertices(), surface.faces());
+    for i in candidates {
+        let p = points.vertices()[i as usize];
+        if let Some((g, d2)) = bvh.nearest(p, |g| {
+            let t = f[g as usize];
+            distance2_triangle(p, v[t[0] as usize], v[t[1] as usize], v[t[2] as usize])
+        }) {
+            if d2 < eps * eps {
+                out.extend(f[g as usize]);
+            }
+        }
+    }
+    out
+}
+
+/// Comme [`close_contacts`], restreint aux sommets dont le dégagement a pu changer quand seules les faces
+/// de la région ont bougé : les sommets de ces faces et ceux qui en sont (ou en étaient) à moins de `eps`.
+fn close_contacts_among(mesh: &TriMesh, eps: f64, before: &[f64], region: &Region) -> std::collections::HashSet<u32> {
+    let mut out = std::collections::HashSet::new();
+    if eps <= 0.0 {
+        return out;
+    }
+    let grid = surfoxide_check::PointGrid::new(mesh.vertices(), GRID_CELL);
+    let mut candidates: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    for &f in &region.faces {
+        candidates.extend(mesh.faces()[f as usize]);
+        let (lo, hi, _) = face_box(mesh, f, eps + region.margin);
+        grid.visit_box(lo, hi, |i| {
+            candidates.insert(i);
+        });
+    }
+    let bvh = Bvh::new(mesh);
+    let (v, faces) = (mesh.vertices(), mesh.faces());
+    for i in candidates {
+        let p = v[i as usize];
+        let Some((g, d2)) = bvh.nearest(p, |g| {
+            let t = faces[g as usize];
+            if t.contains(&i) {
+                return f64::INFINITY;
+            }
+            distance2_triangle(p, v[t[0] as usize], v[t[1] as usize], v[t[2] as usize])
+        }) else {
+            continue;
+        };
+        let d = d2.sqrt();
+        if d < eps && d < before[i as usize] - 1e-9 {
+            out.insert(i);
+            out.extend(faces[g as usize]);
+        }
+    }
+    out
 }
 
 /// Dégagement courant de chaque sommet (infini si la contrainte est désactivée).
@@ -611,8 +704,8 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
         // Un pas est retenu s'il ferait se couper la piale (avec elle-même ou avec la blanche), s'il
         // amènerait une face de la piale trop près d'un sommet blanc, ou deux berges trop près l'une de l'autre.
         let before = clearances(&pial, params.min_clearance);
-        safe_update_with(&mut pial, &target, |m| {
-            pial_conflicts(m, white, params.min_distance, params.min_clearance, &before)
+        safe_update_with(&mut pial, &target, |m, f| {
+            pial_conflicts(m, white, params.min_distance, params.min_clearance, &before, f)
         });
         for i in 0..white.n_vertices() {
             if pial.vertices()[i] == target[i] {
@@ -639,8 +732,8 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
             target[i] = at(i, tried[i]);
         }
         let before = clearances(&pial, params.min_clearance);
-        safe_update_with(&mut pial, &target, |m| {
-            pial_conflicts(m, white, params.min_distance, params.min_clearance, &before)
+        safe_update_with(&mut pial, &target, |m, f| {
+            pial_conflicts(m, white, params.min_distance, params.min_clearance, &before, f)
         });
         for &i in &behind {
             if pial.vertices()[i] == target[i] {
@@ -779,8 +872,8 @@ pub fn regularize(pial: &mut TriMesh, white: &TriMesh, params: &RegularizeParams
             new[i as usize] = vec3::add(v[i as usize], vec3::scale(tangential, 0.5));
         }
         let before = clearances(pial, min_clearance);
-        let held = safe_update_with(pial, &new, |m| {
-            pial_conflicts(m, white, min_distance, min_clearance, &before)
+        let held = safe_update_with(pial, &new, |m, f| {
+            pial_conflicts(m, white, min_distance, min_clearance, &before, f)
         });
         if held == region.len() {
             break;

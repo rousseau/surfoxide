@@ -51,8 +51,9 @@ Piale utilisable par gyroxide (octobre 2026) : dégagement imposé entre berges 
 = 0,25 × arête moyenne de la blanche ; sans lui, l'auto-contact de gyroxide agit dès l'état initial et la
 simulation diverge) et régularisation tangentielle des triangles (`surfoxide_pial::regularize`, même
 triangulation que la blanche). `surfx check` rapporte `min_clearance`. Validation 7 : contrat inchangé
-(383/386, 378/384) ; ~18 % des sommets de piale retenus (manque moyen 0,45 mm, sans effet sur l'épaisseur) ;
-piale ~2× plus lente. Boucle de bout en bout faite sur une session de 21 SA : `gyroxide/tools/atlas_to_mesh.py`
+(383/386, 378/384) ; ~18 % des sommets de piale retenus (manque moyen 0,45 mm, sans effet sur l'épaisseur).
+`safe_update_with` ne recontrôle, après le premier passage, que les faces des sommets ramenés (résultat
+identique au bit près, vérifié sur 21 hémisphères) : piale à 36 SA 163 → 90 s. Boucle de bout en bout faite sur une session de 21 SA : `gyroxide/tools/atlas_to_mesh.py`
 (TetGen) sur notre piale + blanche, simulation complète (il faut `--mesh-spacing 0.0136`, le `a` de l'atlas :
 avec l'arête moyenne, divergence vers t ≈ 0,1), relecture et DPF* ici ; la surface simulée a des
 auto-intersections (contact par pénalité), que `surfx check` signale.
