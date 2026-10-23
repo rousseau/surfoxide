@@ -8,4 +8,13 @@ burn = { workspace = true }
 surfoxide-core = { path = "../surfoxide-core" }
 
 [dev-dependencies]
-burn = { workspace = true, features = ["flex"] }
+burn = { workspace = true, features = ["flex", "autodiff"] }
+surfoxide-metrics = { path = "../surfoxide-metrics" }
+surfoxide-io = { path = "../surfoxide-io" }
+
+[features]
+cuda = ["burn/cuda"]
+
+[[example]]
+name = "ops_gpu"
+required-features = ["cuda"]

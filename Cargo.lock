@@ -5565,6 +5565,8 @@ version = "0.1.0"
 dependencies = [
  "burn",
  "surfoxide-core",
+ "surfoxide-io",
+ "surfoxide-metrics",
 ]
 
 [[package]]

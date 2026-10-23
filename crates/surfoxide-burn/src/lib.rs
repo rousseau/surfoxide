@@ -4,6 +4,8 @@
 //! Le retour vers un [`TriMesh`] garde la connectivité d'origine : seules les positions changent, ce qui
 //! est le cas des déformations (gonflement, réseaux de déformation, intégrateur ODE).
 
+pub mod geometry;
+
 use std::fmt;
 
 use burn::prelude::{Device, Int, Tensor, TensorData};

@@ -78,6 +78,17 @@ P1 : intégrateur ODE dans Burn, réseaux de déformation à la CoSeg (faiblemen
 segmentations de medoxide), opérateurs différentiels, métriques (épaisseur, profondeur sulcale,
 gyrification, métrique spectrale), projection des lobes multi-BOUNTI, lecture des surfaces simulées
 renvoyées par gyroxide.
+Plan P1 validé (octobre 2026) : piale apprise à partir de notre blanche (déformation par ODE à la CortexODE,
+supervision sommet à sommet par la piale du flot + perte faible de distance à la frontière à sillons ouverts),
+entrée = segmentation seule, cohorte CRL2025 découpée par sujet (`subjects.csv`, colonne `split`) ; la sortie
+repasse par nos garde-fous (contrat). Jalons : 1. opérateurs Burn ; 2. intégrateur ODE ; 3. précalcul des
+données ; 4. entraînement et évaluation ; 5. intégration dans `surfx run`.
+Jalon 1 — fait (`surfoxide-burn::geometry`) : normales, aires, raideur cotangente et masse appliquées à un champ,
+échantillonnage trilinéaire différentiable, DPF par gradient conjugué ; égaux aux opérateurs CPU (tests `flex`),
+gradients vérifiés par différences finies. Sur la 2080 Ti (blanche de 121 000 sommets) : raideur·u 2,8 ms, DPF
+0,33 s. Les sommes par sommet passent par une lecture indexée au format ELL : `select_assign` avec addition est
+sérialisé sur CUDA (~100 ms par appel). Temps GPU : `cargo test --release -p surfoxide-burn --features cuda --
+--ignored` avec `SURFOXIDE_TEST_SURFACE=<blanche.surf.gii>`.
 Profondeur sulcale — fait (`surfoxide-metrics`, `surfx depth`, écrite par `surfx run` sur la blanche) : DPF*
 (Dieudonné, Auzias, Lefèvre, Comput Biol Med 2026), pas le `sulc` de FreeSurfer (dépendant de la taille).
 Choix confirmés par les auteurs (code : github.com/maximedieudonne/DPF-star) : système (S/2 + αB) D = 2B(K − K̄)
