@@ -60,7 +60,13 @@ Reste en P0 : 7 hémisphères dont la piale ne démarre pas (arêtes vives de la
 seuil de distance ; quelques piales héritent d'une blanche déjà serrée (dégagement < 0,1 mm) ; côté gyroxide,
 masque médial lu depuis `_cortex.shape.gii`, sortie GIfTI en mm et pas de temps à dériver de la qualité
 du maillage. Retour du collègue (DPF*) : améliorer l'extraction de la blanche (ondulations millimétriques
-avant 28 SA) ; α_ref à recalibrer pour les fœtus.
+avant 28 SA) ; α_ref à recalibrer pour les fœtus. Essai non retenu (octobre 2026, branche locale
+`lissage-contraint`) : lissage laplacien contraint à une bande de ±0,8 voxel autour de la frontière de l'objet
+blanc ; il divise par deux les taches de la DPF* à 21 SA (HD95 0,17 → 0,30 mm) mais amincit les crêtes
+étroites en lames que le remaillage replie ou que la piale ne peut quitter (validation 8 : 379/386 et
+374/384 ; après remaillage, nouveaux échecs dès 5 pas). Un flou plus fort de la distance signée ferme les
+sillons (HD95 0,8 mm à 36 SA) ; plus de pas de Taubin ne lisse presque rien. Pistes restantes : laplacien
+épargnant les sommets de forte courbure, ou fonction implicite plus lisse (probabilités de la segmentation).
 
 P1 : intégrateur ODE dans Burn, réseaux de déformation à la CoSeg (faiblement supervisés par les
 segmentations de medoxide), opérateurs différentiels, métriques (épaisseur, profondeur sulcale,
