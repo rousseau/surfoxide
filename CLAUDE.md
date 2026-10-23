@@ -89,6 +89,9 @@ gradients vérifiés par différences finies. Sur la 2080 Ti (blanche de 121 000
 0,33 s. Les sommes par sommet passent par une lecture indexée au format ELL : `select_assign` avec addition est
 sérialisé sur CUDA (~100 ms par appel). Temps GPU : `cargo test --release -p surfoxide-burn --features cuda --
 --ignored` avec `SURFOXIDE_TEST_SURFACE=<blanche.surf.gii>`.
+Jalon 2 — fait (`surfoxide-ode`) : Euler et RK4 à pas fixe sur `[N, 3]`, rétropropagation à travers les pas ;
+ordres de convergence vérifiés (1 et 4), gradient exact sur une dilatation, icosphère déformée restée valide.
+Sur la 2080 Ti : 121 000 sommets, 10 pas RK4 dans un champ échantillonné, passe avant + arrière 2,25 s, 2,6 Go.
 Profondeur sulcale — fait (`surfoxide-metrics`, `surfx depth`, écrite par `surfx run` sur la blanche) : DPF*
 (Dieudonné, Auzias, Lefèvre, Comput Biol Med 2026), pas le `sulc` de FreeSurfer (dépendant de la taille).
 Choix confirmés par les auteurs (code : github.com/maximedieudonne/DPF-star) : système (S/2 + αB) D = 2B(K − K̄)

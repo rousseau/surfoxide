@@ -5621,6 +5621,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "surfoxide-ode"
+version = "0.1.0"
+dependencies = [
+ "burn",
+ "surfoxide-burn",
+ "surfoxide-check",
+ "surfoxide-core",
+ "surfoxide-io",
+]
+
+[[package]]
 name = "surfoxide-pial"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,17 @@
+[package]
+name = "surfoxide-ode"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+burn = { workspace = true }
+
+[dev-dependencies]
+burn = { workspace = true, features = ["flex", "autodiff"] }
+surfoxide-core = { path = "../surfoxide-core" }
+surfoxide-burn = { path = "../surfoxide-burn" }
+surfoxide-check = { path = "../surfoxide-check" }
+surfoxide-io = { path = "../surfoxide-io" }
+
+[features]
+cuda = ["burn/cuda", "surfoxide-burn/cuda"]
