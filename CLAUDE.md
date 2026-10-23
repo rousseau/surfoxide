@@ -57,8 +57,13 @@ identique au bit près, vérifié sur 21 hémisphères) : piale à 36 SA 163 →
 (TetGen) sur notre piale + blanche, simulation complète (il faut `--mesh-spacing 0.0136`, le `a` de l'atlas :
 avec l'arête moyenne, divergence vers t ≈ 0,1), relecture et DPF* ici ; la surface simulée a des
 auto-intersections (contact par pénalité), que `surfx check` signale.
-Reste en P0 : 7 hémisphères dont la piale ne démarre pas (arêtes vives de la blanche après 28 SA), 2 sous le
-seuil de distance ; quelques piales héritent d'une blanche déjà serrée (dégagement < 0,1 mm) ; côté gyroxide,
+Reste en P0 : 7 hémisphères dont la piale ne démarre pas, 2 sous le seuil de distance. Cause des 7 (octobre
+2026, reproduction sur sub-re8lj) : dès la blanche initiale, des sommets « plissés » sans cône de décalage
+(aucune direction à angle aigu avec toutes les faces incidentes ; ex. valence 12, somme des angles 582°, faces
+incidentes opposées, triangles corrects) ; tout décalage, si petit soit-il, croise leurs propres faces, et la
+réduction du décalage ne peut qu'échouer ; les lames vues ensuite sont fabriquées par les tentatives de
+sauvetage. Ni le déplacement du sommet vers le barycentre, ni une détente laplacienne sur 4 anneaux (même sans
+garde-fou) ne rendent de cône : il faudrait un remaillage local du pli (ou une correction dans le masque) ; quelques piales héritent d'une blanche déjà serrée (dégagement < 0,1 mm) ; côté gyroxide,
 masque médial lu depuis `_cortex.shape.gii`, sortie GIfTI en mm et pas de temps à dériver de la qualité
 du maillage. Retour du collègue (DPF*) : améliorer l'extraction de la blanche (ondulations millimétriques
 avant 28 SA) ; α_ref à recalibrer pour les fœtus. Essai non retenu (octobre 2026, branche locale
