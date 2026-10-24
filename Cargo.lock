@@ -5605,6 +5605,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "surfoxide-learn"
+version = "0.1.0"
+dependencies = [
+ "burn",
+ "surfoxide-burn",
+ "surfoxide-core",
+ "surfoxide-io",
+ "surfoxide-ode",
+]
+
+[[package]]
 name = "surfoxide-mask"
 version = "0.1.0"
 dependencies = [
@@ -5679,6 +5690,7 @@ dependencies = [
  "surfoxide-core",
  "surfoxide-extract",
  "surfoxide-io",
+ "surfoxide-learn",
  "surfoxide-mask",
  "surfoxide-metrics",
  "surfoxide-pial",

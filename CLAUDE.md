@@ -98,6 +98,11 @@ validation, 163 test, folds par sujet). Par exemple : classes `u8` sur le cadrag
 (0 fond, 1 cortex, 2 substance blanche fermée, 3 nappe médiane des sillons enfouis), distance signée `f32` aux
 faces des voxels de la frontière à sillons ouverts (corrigée d'un demi-voxel), blanche et piale de même
 triangulation. Contrôle : blanche à −1,0 à −1,6 mm, piale à +0,14 à +0,20 mm de cette frontière (médianes).
+Jalon 4 — en cours (`surfoxide-learn`, `surfx train`) : encodeur CNN 3D à trois échelles (0,5/1/2 mm) sur les
+classes, MLP de vitesse sur les caractéristiques échantillonnées et le temps, 10 pas RK4 depuis la blanche ;
+pertes L2 aux sommets de la piale + distance signée au carré ; Adam ; entraînement sur un tirage de 16 384
+sommets par pas (chaque sommet suit sa propre trajectoire). Surapprentissage contrôlé (2 hémisphères, 150
+époques, 2080 Ti) : erreur aux sommets 1,38 → 0,16 mm, distance à la frontière 1,07 → 0,12 mm.
 Profondeur sulcale — fait (`surfoxide-metrics`, `surfx depth`, écrite par `surfx run` sur la blanche) : DPF*
 (Dieudonné, Auzias, Lefèvre, Comput Biol Med 2026), pas le `sulc` de FreeSurfer (dépendant de la taille).
 Choix confirmés par les auteurs (code : github.com/maximedieudonne/DPF-star) : système (S/2 + αB) D = 2B(K − K̄)

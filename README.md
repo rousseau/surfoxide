@@ -23,6 +23,7 @@ le contrat ci-dessous.
 | `surfx selftest` | Construit une icosphère et un tore et affiche leur bilan topologique |
 | `surfx run` | Surfaces blanche et piale de chaque hémisphère ; champs `thickness`, `curv`, `sulc` (DPF*, crêtes positives comme l'atlas dHCP, à l'inverse de FreeSurfer) et masque du cortex (`.shape.gii`) ; contrôle des maillages `desc-surfqc.tsv` ; rapport de contrat JSON. Avec `--bids`, dérivées `surfx-surfaces` lues par guioxide |
 | `surfx depth` | Courbure moyenne et profondeur sulcale DPF* d'une surface |
+| `surfx train` | Entraîne le réseau de déformation blanche → piale (P1) sur le jeu de `scripts/dataset.py` |
 | `surfx dataset` | Exemple d'entraînement d'un hémisphère (P1) : classes de tissu, distance signée, blanche et piale |
 | `surfx white` | Surface blanche de genre 0 de chaque hémisphère (GIfTI) : masque, correction topologique, marching cubes, Taubin, remaillage isotrope, réparation ; rapport de contrat JSON |
 | `surfx eval` | Distance d'une surface à la frontière de la segmentation (Hausdorff 95 %), qualité du maillage, contrat |
@@ -61,6 +62,8 @@ crates/
   surfoxide-remesh/ remaillage isotrope (Botsch–Kobbelt) sur une table des coins modifiable
   surfoxide-repair/ suppression des auto-intersections par déplacement de sommets
   surfoxide-pial/   piale par les lignes de courant du champ de Laplace, sillons enfouis
+  surfoxide-ode/     intégrateur ODE (Euler, RK4) sur tenseurs Burn
+  surfoxide-learn/   réseau de déformation blanche → piale (encodeur 3D, champ de vitesse), entraînement
   surfoxide-metrics/ Laplace–Beltrami éléments finis, courbure (Rusinkiewicz), enveloppe convexe,
                     profondeur sulcale DPF* invariante d'échelle (Dieudonné, Auzias, Lefèvre 2026)
   surfx/            binaire CLI : une sous-commande par module

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/surfoxide-core", "crates/surfoxide-burn", "crates/surfoxide-io", "crates/surfoxide-mask", "crates/surfoxide-topofix", "crates/surfoxide-extract", "crates/surfoxide-check", "crates/surfoxide-remesh", "crates/surfoxide-repair", "crates/surfoxide-pial", "crates/surfoxide-metrics", "crates/surfoxide-ode", "crates/surfx"]
+members = ["crates/surfoxide-core", "crates/surfoxide-burn", "crates/surfoxide-io", "crates/surfoxide-mask", "crates/surfoxide-topofix", "crates/surfoxide-extract", "crates/surfoxide-check", "crates/surfoxide-remesh", "crates/surfoxide-repair", "crates/surfoxide-pial", "crates/surfoxide-metrics", "crates/surfoxide-ode", "crates/surfoxide-learn", "crates/surfx"]
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive", "env"] }

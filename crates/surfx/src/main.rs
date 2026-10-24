@@ -11,6 +11,7 @@
 //!   lit la segmentation de `medx bounti --bids` et écrit les dérivées `surfx-surfaces` (contrat de guioxide).
 //! - `eval` : distance d'une surface à la frontière de la segmentation, qualité du maillage, contrat.
 //! - `check` : contrôle du contrat d'une surface (topologie, auto-intersections) ou d'un couple WM/piale.
+//! - `train` : entraînement du réseau de déformation blanche → piale (P1).
 //! - `dataset` : exemple d'entraînement d'un hémisphère pour les réseaux de déformation (P1).
 //! - `depth` : courbure moyenne et profondeur sulcale DPF* (invariante d'échelle) d'une surface.
 
@@ -161,6 +162,39 @@ enum Command {
         /// Rapport JSON écrit dans ce fichier (sinon sur la sortie standard)
         #[arg(long)]
         json: Option<PathBuf>,
+    },
+    /// Entraîne le réseau de déformation blanche → piale (P1) sur un jeu écrit par scripts/dataset.py
+    Train {
+        /// Dossier du jeu d'entraînement (index.tsv)
+        #[arg(long)]
+        dataset: PathBuf,
+        /// Dossier de sortie : train.tsv, model.mpk
+        #[arg(long, short)]
+        out: PathBuf,
+        /// Backend de calcul
+        #[arg(long, value_enum, default_value = "cpu")]
+        backend: BackendArg,
+        #[arg(long, default_value_t = 20)]
+        epochs: usize,
+        #[arg(long, default_value_t = 1e-3)]
+        lr: f64,
+        /// Sommets tirés par pas
+        #[arg(long, default_value_t = 16384)]
+        vertices: usize,
+        /// Pas RK4 de l'intégration
+        #[arg(long, default_value_t = 10)]
+        ode_steps: usize,
+        /// Poids de la perte de distance à la frontière des tissus
+        #[arg(long, default_value_t = 1.0)]
+        w_sdf: f64,
+        /// N'utiliser que les N premiers exemples (surapprentissage contrôlé)
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Sommets tirés par exemple pour l'évaluation
+        #[arg(long, default_value_t = 32768)]
+        eval_vertices: usize,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
     },
     /// Exemple d'entraînement d'un hémisphère (P1) : classes de tissu, distance signée, blanche et piale
     Dataset {
@@ -430,6 +464,31 @@ fn main() -> ExitCode {
         }
         Command::Convert { input, output } => run_convert(&input, &output),
         Command::Mask { seg, labels, hemi, out } => run_mask(&seg, &labels, hemi, &out),
+        Command::Train {
+            dataset,
+            out,
+            backend,
+            epochs,
+            lr,
+            vertices,
+            ode_steps,
+            w_sdf,
+            limit,
+            eval_vertices,
+            seed,
+        } => device_for(backend).and_then(|device| {
+            let cfg = surfoxide_learn::train::TrainConfig {
+                epochs,
+                lr,
+                vertices,
+                ode_steps,
+                w_sdf,
+                limit,
+                eval_vertices,
+                seed,
+            };
+            surfoxide_learn::train::train(&dataset, &out, &cfg, &device.autodiff()).map(|_| ())
+        }),
         Command::Dataset {
             seg,
             labels,

@@ -210,6 +210,82 @@ impl DeviceVolume {
     }
 }
 
+/// Passage des points monde aux coordonnées voxel continues d'une grille (sur le device).
+#[derive(Debug, Clone)]
+pub struct GridMap {
+    dims: [usize; 3],
+    /// Partie linéaire transposée (`[3, 3]`) et translation (`[1, 3]`) de l'application monde → voxel.
+    linear_t: Tensor<2>,
+    translation: Tensor<2>,
+}
+
+impl GridMap {
+    /// Grille de dimensions `dims` dont l'affine voxel → monde est `affine`, sous-échantillonnée d'un facteur
+    /// `stride` (une convolution de pas 2, noyau 3, marge 1 : le voxel `j` est le voxel `stride · j` de la grille
+    /// d'origine ; dimensions ⌈n / stride⌉).
+    pub fn new(dims: [usize; 3], affine: &Affine, stride: usize, device: &Device) -> Self {
+        let inv = surfoxide_core::volume::invert_affine(affine).expect("affine inversible");
+        let s = stride as f64;
+        let lt: Vec<f32> = (0..3)
+            .flat_map(|c| (0..3).map(move |r| (c, r)))
+            .map(|(c, r)| (inv[r][c] / s) as f32)
+            .collect();
+        GridMap {
+            dims: dims.map(|n| n.div_ceil(stride)),
+            linear_t: Tensor::from_floats(TensorData::new(lt, [3, 3]), device),
+            translation: Tensor::from_floats(
+                TensorData::new((0..3).map(|r| (inv[r][3] / s) as f32).collect(), [1, 3]),
+                device,
+            ),
+        }
+    }
+
+    pub fn dims(&self) -> [usize; 3] {
+        self.dims
+    }
+
+    /// Interpolation trilinéaire des canaux `flat` (`[nx · ny · nz, C]`, indice `i + nx (j + ny k)`) aux points
+    /// monde `p` (`[M, 3]`), bords répliqués : `[M, C]`. Différentiable par rapport aux points et aux valeurs.
+    pub fn sample(&self, flat: &Tensor<2>, p: &Tensor<2>) -> Tensor<2> {
+        let q = p.clone().matmul(self.linear_t.clone()) + self.translation.clone();
+        let mut base = Vec::with_capacity(3);
+        let mut frac = Vec::with_capacity(3);
+        for a in 0..3 {
+            let hi = self.dims[a] as f32 - 1.0;
+            let x = q.clone().narrow(1, a, 1).clamp(0.0, hi);
+            let i = x.clone().detach().floor().clamp(0.0, (hi - 1.0).max(0.0));
+            frac.push(x - i.clone());
+            base.push(i.int());
+        }
+        let [nx, ny] = [self.dims[0] as i32, self.dims[1] as i32];
+        let m = p.dims()[0];
+        let mut acc: Option<Tensor<2>> = None;
+        for corner in 0..8 {
+            let o = [corner & 1, (corner >> 1) & 1, (corner >> 2) & 1];
+            let idx = (base[0].clone() + o[0]) + (base[1].clone() + o[1]) * nx + (base[2].clone() + o[2]) * (nx * ny);
+            let mut w: Option<Tensor<2>> = None;
+            for a in 0..3 {
+                let wa = if o[a] == 1 {
+                    frac[a].clone()
+                } else {
+                    frac[a].clone().neg() + 1.0
+                };
+                w = Some(w.map_or(wa.clone(), |w| w * wa));
+            }
+            let term = flat.clone().select(0, idx.reshape([m])) * w.expect("trois poids");
+            acc = Some(acc.map_or(term.clone(), |a| a + term));
+        }
+        acc.expect("huit coins")
+    }
+}
+
+/// Canaux d'un tenseur de convolution `[1, C, nz, ny, nx]` mis à plat en `[nx · ny · nz, C]` (indice
+/// `i + nx (j + ny k)`, celui de [`Volume`]), pour [`GridMap::sample`].
+pub fn flatten_channels(t: Tensor<5>) -> Tensor<2> {
+    let [_, c, nz, ny, nx] = t.dims();
+    t.reshape([c, nz * ny * nx]).transpose()
+}
+
 /// DPF (même système que `surfoxide_metrics::depth_potential`) : `(S/2 + α B) D = 2 B (K − K̄)`, résolu par
 /// gradient conjugué préconditionné par la diagonale, sur le device. `k` : courbure moyenne `[N, 1]`.
 pub fn depth_potential(
@@ -362,6 +438,59 @@ mod tests {
         );
         let gpu = to_vec(DeviceVolume::new(&vol, &device).sample(&pt));
         assert!(max_rel(&gpu, &cpu) < 1e-5);
+    }
+
+    #[test]
+    fn echantillonnage_de_canaux_et_sous_echantillonnage() {
+        // Deux canaux affines en (i, j, k) sur une grille anisotrope : l'interpolation trilinéaire est exacte, y
+        // compris sur une grille sous-échantillonnée d'un facteur 2 (voxel j = voxel 2j de l'original).
+        let device = Device::flex();
+        let mut aff = IDENTITY;
+        aff[0][0] = 0.5;
+        aff[1][1] = 0.5;
+        aff[2][2] = 0.7;
+        aff[0][3] = 10.0;
+        let dims = [10, 8, 6];
+        let f = |i: f64, j: f64, k: f64| [1.0 + i - 2.0 * j + 0.5 * k, 3.0 * k - i];
+        for stride in [1usize, 2] {
+            let map = GridMap::new(dims, &aff, stride, &device);
+            let [nx, ny, nz] = map.dims();
+            let mut data = Vec::new();
+            for k in 0..nz {
+                for j in 0..ny {
+                    for i in 0..nx {
+                        let v = f((stride * i) as f64, (stride * j) as f64, (stride * k) as f64);
+                        data.extend(v.map(|x| x as f32));
+                    }
+                }
+            }
+            let flat = Tensor::<2>::from_floats(TensorData::new(data, [nx * ny * nz, 2]), &device);
+            let pts = [[11.3, 1.2, 1.5], [12.0, 2.6, 2.1]];
+            let p = Tensor::<2>::from_floats(
+                TensorData::new(pts.iter().flatten().map(|&x| x as f32).collect(), [2, 3]),
+                &device,
+            );
+            let got = to_vec(map.sample(&flat, &p));
+            for (n, q) in pts.iter().enumerate() {
+                let (i, j, k) = ((q[0] - 10.0) / 0.5, q[1] / 0.5, q[2] / 0.7);
+                let e = f(i, j, k);
+                for c in 0..2 {
+                    assert!(
+                        (got[2 * n + c] as f64 - e[c]).abs() < 1e-3,
+                        "pas {stride} : {got:?} contre {e:?}"
+                    );
+                }
+            }
+        }
+        // Mise à plat d'un tenseur de convolution : même indice que `Volume`.
+        let t = Tensor::<1>::from_floats(
+            TensorData::new((0..24).map(|x| x as f32).collect::<Vec<_>>(), [24]),
+            &device,
+        )
+        .reshape([1, 1, 2, 3, 4]);
+        let flat = to_vec(flatten_channels(t));
+        // La valeur en (k, j, i) vaut i + 4 (j + 3 k) : elle doit se retrouver à cet indice.
+        assert!(flat.iter().enumerate().all(|(n, &x)| x == n as f32), "{flat:?}");
     }
 
     #[test]
