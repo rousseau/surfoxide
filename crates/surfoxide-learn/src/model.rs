@@ -11,8 +11,14 @@ use surfoxide_ode::{integrate, Scheme};
 
 use crate::data::N_CLASSES;
 
-/// Canaux des trois échelles de l'encodeur (0,5, 1 et 2 mm pour des voxels de 0,5 mm).
-pub const CHANNELS: [usize; 3] = [16, 32, 64];
+/// Canaux des quatre échelles lues par le champ de vitesse, pour des voxels de 0,5 mm : les classes elles-mêmes
+/// (0,5 mm), puis les caractéristiques de l'encodeur à 1, 2 et 4 mm. Aucune convolution à pleine résolution : une
+/// activation de 16 canaux sur le cadrage d'un hémisphère de 36 SA (jusqu'à 5 millions de voxels) pèse 330 Mo, et la
+/// rétropropagation en garde plusieurs.
+pub const CHANNELS: [usize; 4] = [N_CLASSES, 16, 32, 64];
+
+/// Facteur de sous-échantillonnage de chaque échelle.
+const STRIDES: [usize; 4] = [1, 2, 4, 8];
 
 fn conv(c_in: usize, c_out: usize, stride: usize, device: &Device) -> Conv3d {
     Conv3dConfig::new([c_in, c_out], [3, 3, 3])
@@ -21,7 +27,8 @@ fn conv(c_in: usize, c_out: usize, stride: usize, device: &Device) -> Conv3d {
         .init(device)
 }
 
-/// Encodeur à trois échelles : deux convolutions par échelle, passage à l'échelle suivante par un pas de 2.
+/// Encodeur à trois échelles (1, 2, 4 mm) : chaque échelle commence par une convolution de pas 2, suivie d'une
+/// convolution de pas 1.
 #[derive(Module, Debug)]
 pub struct Encoder {
     c1a: Conv3d,
@@ -34,9 +41,9 @@ pub struct Encoder {
 
 impl Encoder {
     pub fn new(device: &Device) -> Self {
-        let [a, b, c] = CHANNELS;
+        let [_, a, b, c] = CHANNELS;
         Encoder {
-            c1a: conv(N_CLASSES, a, 1, device),
+            c1a: conv(N_CLASSES, a, 2, device),
             c1b: conv(a, a, 1, device),
             c2a: conv(a, b, 2, device),
             c2b: conv(b, b, 1, device),
@@ -45,16 +52,16 @@ impl Encoder {
         }
     }
 
-    /// Caractéristiques des trois échelles pour une entrée `[1, N_CLASSES, nz, ny, nx]`.
-    pub fn forward(&self, x: Tensor<5>) -> [Tensor<5>; 3] {
-        let f1 = relu(self.c1b.forward(relu(self.c1a.forward(x))));
+    /// Entrée `[1, N_CLASSES, nz, ny, nx]` et caractéristiques des trois échelles.
+    pub fn forward(&self, x: Tensor<5>) -> [Tensor<5>; 4] {
+        let f1 = relu(self.c1b.forward(relu(self.c1a.forward(x.clone()))));
         let f2 = relu(self.c2b.forward(relu(self.c2a.forward(f1.clone()))));
         let f3 = relu(self.c3b.forward(relu(self.c3a.forward(f2.clone()))));
-        [f1, f2, f3]
+        [x, f1, f2, f3]
     }
 }
 
-/// Champ de vitesse : MLP sur les caractéristiques des trois échelles au point, et le temps.
+/// Champ de vitesse : MLP sur les caractéristiques des quatre échelles au point, et le temps.
 #[derive(Module, Debug)]
 pub struct Velocity {
     l1: Linear,
@@ -115,7 +122,7 @@ impl DeformNet {
 
     /// Caractéristiques de l'hémisphère dont les classes sont `classes` (grille et affine du cadrage).
     pub fn features(&self, classes: &Volume<u8>, device: &Device) -> Features {
-        let maps = [1usize, 2, 4].map(|s| GridMap::new(classes.dims(), classes.affine(), s, device));
+        let maps = STRIDES.map(|s| GridMap::new(classes.dims(), classes.affine(), s, device));
         let levels = self.encoder.forward(one_hot(classes, device));
         Features {
             flat: levels.into_iter().map(flatten_channels).collect(),
