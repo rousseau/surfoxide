@@ -71,6 +71,7 @@ scripts/
   setup-linux.sh    préparation d'une machine Ubuntu avec GPU NVIDIA
   fetch-data.sh     rapatrie les segmentations (et T2w) depuis Garage dans $SURFOXIDE_DATA
   validate.py       validation sur la cohorte et comparaison à fetpype
+  dpf_benchmark.py  critères de profondeur sulcale de l'article DPF* (StdCrest, Sep, Dev) sur des repères
   dataset.py        jeu d'entraînement des réseaux de déformation à partir d'une validation (P1)
   illustrate.py     figure T2w, segmentation et surfaces pour quelques âges (numpy, nibabel, matplotlib)
   plate.py          planche de toutes les surfaces d'un dossier, de la plus jeune à la plus âgée

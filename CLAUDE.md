@@ -119,9 +119,13 @@ leur code) ou volume enfermé (`--length volume`, comme le texte de l'article) ;
 leur code n'est que d'affichage, non repris) ; signe conventionnel, crêtes positives. Vérifiée contre ce code
 sur l'atlas dHCP 21/28/36 SA (courbure à 6e-8, D* à 6e-6 près pour un IPR de 0,03 à 0,07) ; invariance par
 homothétie et robustesse au remaillage (r ≥ 0,987 de 0,35 à 1 mm) testées. Points ouverts : benchmark Zenodo
-(repères tracés sur des surfaces dHCP release 1, disponibles au labo mais pas encore sur Garage, et KKI) ; avant 28 SA, α_ref = 500 donne un noyau
+(repères tracés sur des surfaces dHCP release 1, disponibles au labo mais pas encore sur Garage, et KKI ;
+`scripts/dpf_benchmark.py` calcule StdCrest, Sep et Dev à partir des repères, autotest sur une sphère ondulée) ; avant 28 SA, α_ref = 500 donne un noyau
 de ~1,2 mm et la DPF* capte les ondulations millimétriques du contour de la segmentation (présentes sur la
-blanche à toutes les échelles, pas un défaut du maillage).
+blanche à toutes les échelles, pas un défaut du maillage). Comptés en bassins (D* < 0) d'au moins 5 mm², et non en
+sommets, nos blanches et l'atlas sont comparables avant 25 SA à α_ref = 500 (10 contre 8 à 13) ; nous en comptons
+~1,5× plus après 30 SA. Note de discussion pour les auteurs (options α_ref = 500, α_ref fœtal, noyau plancher
+L/√α ≥ 1,65 mm) : https://claude.ai/artifact/Li49SnNzY9pPMVVZUvEuB2
 
 Baseline de référence pour P0 : fetpype `surface_processing` (github.com/fetpype/surface_processing).
 
