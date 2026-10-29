@@ -5,6 +5,7 @@
 //!   sert à valider l'installation, notamment CUDA sous WSL.
 //! - `selftest` : construit des surfaces de référence et affiche leur bilan topologique.
 //! - `convert` : convertit une surface d'un format à l'autre (GIfTI, VTP, PLY, STL, FreeSurfer).
+//! - `segqc` : contrôle de la segmentation (substance blanche au contact du fond : tissu étiqueté fond).
 //! - `mask` : masque blanc fermé d'un hémisphère à partir d'une segmentation (multi-)BOUNTI.
 //! - `white` : surface blanche (WM/GM) de genre 0 de chaque hémisphère, en GIfTI.
 //! - `run` : surfaces blanche et piale de chaque hémisphère, épaisseur et rapport de contrat ; avec `--bids`,
@@ -230,6 +231,14 @@ enum Command {
         #[arg(long, short)]
         out: PathBuf,
     },
+    /// Contrôle de la segmentation : aire de contact substance blanche–fond par hémisphère (trous étiquetés fond)
+    Segqc {
+        /// Segmentation NIfTI
+        seg: PathBuf,
+        /// Table de labels : bounti19 ou multibounti43
+        #[arg(long, default_value = "bounti19")]
+        labels: LabelTable,
+    },
     /// Masque blanc fermé d'un hémisphère (NIfTI u8) à partir d'une segmentation
     Mask {
         /// Segmentation NIfTI
@@ -398,6 +407,24 @@ fn run_depth(
     Ok(())
 }
 
+fn run_segqc(seg: &PathBuf, table: &LabelTable) -> Result<(), String> {
+    let (labels, _) = surfoxide_io::nifti::read_labels(seg).map_err(|e| format!("{}: {e}", seg.display()))?;
+    for hemi in Hemisphere::BOTH {
+        let contact = surfoxide_mask::white_background_contact(&labels, table, hemi);
+        println!(
+            "{}\themi-{}\t{contact:.1}\t{}",
+            seg.display(),
+            hemi.bids(),
+            if contact > white::SEG_CONTACT_SUSPECT {
+                "suspect"
+            } else {
+                "ok"
+            }
+        );
+    }
+    Ok(())
+}
+
 fn run_mask(seg: &PathBuf, table: &LabelTable, hemi: Hemisphere, out: &PathBuf) -> Result<(), String> {
     let (labels, header) = surfoxide_io::nifti::read_labels(seg).map_err(|e| format!("{}: {e}", seg.display()))?;
     let mask = surfoxide_mask::white_mask(&labels, table, hemi);
@@ -464,6 +491,7 @@ fn main() -> ExitCode {
         }
         Command::Convert { input, output } => run_convert(&input, &output),
         Command::Mask { seg, labels, hemi, out } => run_mask(&seg, &labels, hemi, &out),
+        Command::Segqc { seg, labels } => run_segqc(&seg, &labels),
         Command::Train {
             dataset,
             out,

@@ -17,6 +17,13 @@ use surfoxide_mask::LabelTable;
 use surfoxide_pial::{pial_from_white, solve_laplace, sulcal_skeleton, Field, PialParams};
 use surfoxide_topofix::{correct_topology, Strategy};
 
+/// Aire de contact substance blanche–fond (mm², un hémisphère) au-delà de laquelle la segmentation est
+/// signalée suspecte : du tissu y est probablement étiqueté fond (voir
+/// `surfoxide_mask::white_background_contact`). Réglé sur la cohorte CRL2025 : aucun hémisphère BOUNTI-19
+/// au-dessus (au plus 30 mm²) ; 16 des 18 sessions multi-BOUNTI-43 dont plus de 3 mL de tissu est étiqueté
+/// fond sont signalées (les deux autres perdent du cortex, pas de substance blanche).
+pub const SEG_CONTACT_SUSPECT: f64 = 100.0;
+
 /// Paramètres de la surface blanche.
 #[derive(Debug, Clone, clap::Args)]
 pub struct WhiteParams {
@@ -328,6 +335,14 @@ pub fn run(
     for &hemi in hemis {
         let t = Instant::now();
         let grids = hemisphere_grids(&labels, table, hemi)?;
+        // Contrôle de la segmentation elle-même : substance blanche au contact du fond.
+        let contact = surfoxide_mask::white_background_contact(&labels, table, hemi);
+        let suspect = contact > SEG_CONTACT_SUSPECT;
+        if suspect {
+            println!(
+                "hémisphère {hemi} : segmentation suspecte, substance blanche au contact du fond sur {contact:.0} mm² (du tissu est probablement étiqueté fond)"
+            );
+        }
         let mut w = white_surface(&grids.white, params)?;
         // La piale peut détendre localement la surface blanche : on la construit avant d'écrire celle-ci.
         // Un échec de la piale n'interrompt pas la session : la blanche est écrite, le rapport le note.
@@ -386,6 +401,10 @@ pub fn run(
         )
         .map_err(|e| format!("{path}: {e}"))?;
         report["cortex_fraction"] = (n_cortical as f64 / cortical.len().max(1) as f64).into();
+        report["segmentation"] = serde_json::json!({
+            "white_background_contact_mm2": contact,
+            "suspect": suspect,
+        });
         // Courbure moyenne et profondeur sulcale DPF* de la blanche (surface de référence de la DPF*).
         let curv = surfoxide_metrics::curvature(&w.mesh);
         let dpf = surfoxide_metrics::dpf_star(

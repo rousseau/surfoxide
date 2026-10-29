@@ -127,6 +127,15 @@ sommets, nos blanches et l'atlas sont comparables avant 25 SA à α_ref = 500 (1
 ~1,5× plus après 30 SA. Note de discussion pour les auteurs (options α_ref = 500, α_ref fœtal, noyau plancher
 L/√α ≥ 1,65 mm) : https://claude.ai/artifact/Li49SnNzY9pPMVVZUvEuB2
 
+Cohérence BOUNTI-19 / multi-BOUNTI-43 (octobre 2026, validation 7, 384 paires d'hémisphères) : volume de la
+substance blanche robuste (CCC 0,999), mais multi-BOUNTI donne une blanche plus plissée (aire +12 %, indice de
+gyrification +10 % après 35 SA), un cortex plus mince (−11,5 %, CCC 0,19) et plus de bassins de DPF* (+28 %
+après 35 SA) : ne jamais mélanger les deux tables dans une analyse. Des sessions multi-BOUNTI ont du tissu
+étiqueté fond (sub-vm989, trois sessions, jusqu'à 42 mL ; sub-14k3w, sub-hkay8 ; 18 sessions > 3 mL), vérifié
+sur la T2w. Contrôle intégré : `surfoxide_mask::white_background_contact` (aire de contact substance
+blanche–fond), `surfx segqc`, et `segmentation` dans le rapport de `surfx run` (suspect au-delà de 100 mm² par
+hémisphère).
+
 Baseline de référence pour P0 : fetpype `surface_processing` (github.com/fetpype/surface_processing).
 
 ## Conventions (alignées sur medoxide)

@@ -7,6 +7,9 @@
 //! sont partagées entre les deux côtés : chaque voxel va au côté le plus proche, par propagation depuis
 //! les voxels latéralisés. Cela ferme la face médiale du masque. On garde ensuite la plus grande
 //! composante 26-connexe et on remplit ses cavités.
+//!
+//! [`white_background_contact`] contrôle la segmentation elle-même : la substance blanche n'y touche jamais
+//! le fond, sauf erreur (tissu étiqueté fond par la segmentation).
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -218,6 +221,41 @@ pub fn hemisphere_masks(labels: &Volume<i32>, table: &LabelTable, hemi: Hemisphe
     (white, cortex)
 }
 
+/// Aire (mm²) de contact entre la substance blanche latéralisée du côté `hemi` (labels [`Tissue::White`] de ce
+/// côté, sans les structures médianes) et le fond (label 0), comptée en faces de voxels.
+///
+/// Dans une segmentation correcte, la substance blanche est entourée de cortex, de ventricules ou de noyaux :
+/// le contact est presque nul (BOUNTI-19 sur la cohorte CRL2025 : médiane 3 mm², au plus 54 mm² pour un
+/// cerveau entier). Une région de tissu étiquetée fond par erreur le fait monter à des centaines ou des
+/// milliers de mm² (multi-BOUNTI-43 : jusqu'à 2 300 mm², corrélation de 0,93 avec le volume manquant).
+pub fn white_background_contact(labels: &Volume<i32>, table: &LabelTable, hemi: Hemisphere) -> f64 {
+    let side = if hemi.is_left() { Side::Left } else { Side::Right };
+    let is_white = |l: i32| table.get(l) == Some((Tissue::White, side));
+    let [nx, ny, nz] = labels.dims();
+    let s = labels.spacing();
+    // Aire d'une face de voxel perpendiculaire à chaque axe.
+    let face = [s[1] * s[2], s[0] * s[2], s[0] * s[1]];
+    let mut area = 0.0;
+    for k in 0..nz {
+        for j in 0..ny {
+            for i in 0..nx {
+                let here = labels.get(i, j, k);
+                for (a, (di, dj, dk)) in [(1, 0, 0), (0, 1, 0), (0, 0, 1)].into_iter().enumerate() {
+                    let (ii, jj, kk) = (i + di, j + dj, k + dk);
+                    if ii >= nx || jj >= ny || kk >= nz {
+                        continue;
+                    }
+                    let there = labels.get(ii, jj, kk);
+                    if (is_white(here) && there == 0) || (here == 0 && is_white(there)) {
+                        area += face[a];
+                    }
+                }
+            }
+        }
+    }
+    area
+}
+
 /// Sommets corticaux d'une surface : vrai si le voxel de cortex le plus proche est à moins de `max_dist`
 /// mm. Les autres forment la face médiale non corticale (ventricules, noyaux gris, plan médian), où
 /// l'épaisseur n'a pas de sens. La carte est nettoyée par `smooth` passes de vote majoritaire sur le
@@ -367,5 +405,37 @@ mod tests {
         assert!(centroid_x(&l) < centroid_x(&r));
         let vol = |m: &Volume<bool>| m.data().iter().filter(|&&b| b).count() as f64 * 0.125;
         assert!(vol(&l) > 10_000.0 && vol(&r) > 10_000.0, "{} {}", vol(&l), vol(&r));
+    }
+
+    #[test]
+    fn contact_substance_blanche_fond() {
+        // Boule de substance blanche gauche (5) entourée de cortex (3) : aucun contact avec le fond. On retire
+        // ensuite le cortex d'un côté : la face de substance blanche découverte touche le fond.
+        let t = LabelTable::bounti19();
+        let mut v = Volume::filled([12, 12, 12], 0i32, surfoxide_core::volume::IDENTITY);
+        for k in 0..12 {
+            for j in 0..12 {
+                for i in 0..12 {
+                    let inside = |a: usize, lo: usize, hi: usize| a >= lo && a <= hi;
+                    if inside(i, 2, 9) && inside(j, 2, 9) && inside(k, 2, 9) {
+                        v.set(i, j, k, 3);
+                    }
+                    if inside(i, 4, 7) && inside(j, 4, 7) && inside(k, 4, 7) {
+                        v.set(i, j, k, 5);
+                    }
+                }
+            }
+        }
+        assert_eq!(white_background_contact(&v, &t, Hemisphere::Left), 0.0);
+        assert_eq!(white_background_contact(&v, &t, Hemisphere::Right), 0.0);
+        for k in 0..12 {
+            for j in 0..12 {
+                for i in 8..12 {
+                    v.set(i, j, k, 0);
+                }
+            }
+        }
+        // Face x = 7 | 8 du cube 4 × 4 de substance blanche : 16 faces de 1 mm².
+        assert_eq!(white_background_contact(&v, &t, Hemisphere::Left), 16.0);
     }
 }
