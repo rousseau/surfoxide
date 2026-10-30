@@ -28,7 +28,7 @@ le contrat ci-dessous.
 | `surfx white` | Surface blanche de genre 0 de chaque hémisphère (GIfTI) : masque, correction topologique, marching cubes, Taubin, remaillage isotrope, réparation ; rapport de contrat JSON |
 | `surfx eval` | Distance d'une surface à la frontière de la segmentation (Hausdorff 95 %), qualité du maillage, contrat |
 | `surfx check` | Contrôle du contrat : topologie, orientation, auto-intersections ; imbrication et épaisseur WM/piale ; rapport JSON |
-| `surfx segqc` | Contrôle d'une segmentation : substance blanche au contact du fond, par hémisphère (tissu étiqueté fond) ; aussi dans le rapport de `surfx run` |
+| `surfx segqc` | Contrôle d'une segmentation, par hémisphère : substance blanche ou cortex au contact du fond (tissu étiqueté fond) ; aussi dans le rapport de `surfx run` |
 | `surfx mask` | Masque blanc fermé d'un hémisphère à partir d'une segmentation BOUNTI-19 ou multi-BOUNTI-43 |
 | `surfx convert` | Convertit une surface (GIfTI, VTP, PLY, STL, FreeSurfer) et affiche son bilan topologique |
 
@@ -60,7 +60,8 @@ crates/
   surfoxide-topofix/ correction topologique voxelique (Bazin, points simples 26/6)
   surfoxide-extract/ marching cubes à connexité cohérente, lissage de Taubin
   surfoxide-check/  BVH, intersections exactes, distances, rapport de contrat
-  surfoxide-remesh/ remaillage isotrope (Botsch–Kobbelt) sur une table des coins modifiable
+  surfoxide-remesh/ remaillage isotrope (Botsch–Kobbelt) sur une table des coins modifiable ; dépliage des
+                    plis et ouverture des sommets sans cône de décalage
   surfoxide-repair/ suppression des auto-intersections par déplacement de sommets
   surfoxide-pial/   piale par les lignes de courant du champ de Laplace, sillons enfouis
   surfoxide-ode/     intégrateur ODE (Euler, RK4) sur tenseurs Burn

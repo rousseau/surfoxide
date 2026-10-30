@@ -5,7 +5,7 @@
 //!   sert à valider l'installation, notamment CUDA sous WSL.
 //! - `selftest` : construit des surfaces de référence et affiche leur bilan topologique.
 //! - `convert` : convertit une surface d'un format à l'autre (GIfTI, VTP, PLY, STL, FreeSurfer).
-//! - `segqc` : contrôle de la segmentation (substance blanche au contact du fond : tissu étiqueté fond).
+//! - `segqc` : contrôle de la segmentation (substance blanche ou cortex au contact du fond : tissu étiqueté fond).
 //! - `mask` : masque blanc fermé d'un hémisphère à partir d'une segmentation (multi-)BOUNTI.
 //! - `white` : surface blanche (WM/GM) de genre 0 de chaque hémisphère, en GIfTI.
 //! - `run` : surfaces blanche et piale de chaque hémisphère, épaisseur et rapport de contrat ; avec `--bids`,
@@ -231,7 +231,8 @@ enum Command {
         #[arg(long, short)]
         out: PathBuf,
     },
-    /// Contrôle de la segmentation : aire de contact substance blanche–fond par hémisphère (trous étiquetés fond)
+    /// Contrôle de la segmentation par hémisphère : contact substance blanche–fond (mm²) et part du bord externe du
+    /// cortex au contact du fond (tissu étiqueté fond)
     Segqc {
         /// Segmentation NIfTI
         seg: PathBuf,
@@ -409,17 +410,16 @@ fn run_depth(
 
 fn run_segqc(seg: &PathBuf, table: &LabelTable) -> Result<(), String> {
     let (labels, _) = surfoxide_io::nifti::read_labels(seg).map_err(|e| format!("{}: {e}", seg.display()))?;
+    println!("seg\themi\twhite_background_mm2\tcortex_background_fraction\tverdict");
     for hemi in Hemisphere::BOTH {
-        let contact = surfoxide_mask::white_background_contact(&labels, table, hemi);
+        let qc = surfoxide_mask::segmentation_qc(&labels, table, hemi);
         println!(
-            "{}\themi-{}\t{contact:.1}\t{}",
+            "{}\themi-{}\t{:.1}\t{:.3}\t{}",
             seg.display(),
             hemi.bids(),
-            if contact > white::SEG_CONTACT_SUSPECT {
-                "suspect"
-            } else {
-                "ok"
-            }
+            qc.white_background_mm2,
+            qc.cortex_background_fraction(),
+            if qc.suspect() { "suspect" } else { "ok" }
         );
     }
     Ok(())

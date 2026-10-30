@@ -5,8 +5,9 @@
 //! rapprochent les valences de 6, relaxation tangentielle, puis reprojection sur la surface d'origine.
 //! La topologie (genre, orientation) est conservée par chaque opération.
 
-use surfoxide_check::bvh::Bvh;
+use surfoxide_check::bvh::{Aabb, Bvh};
 use surfoxide_check::distance::closest_point_triangle;
+use surfoxide_check::{self_intersections_among, PointGrid};
 use surfoxide_core::vec3::{self, Vec3};
 use surfoxide_core::TriMesh;
 
@@ -235,6 +236,179 @@ pub fn unfold(mesh: &TriMesh, max_cos: f64, passes: usize) -> Result<(TriMesh, u
     Ok((m.to_mesh(), remaining))
 }
 
+/// Score de cône du sommet `v` (cosinus de [`vec3::cone_axis`]) ; −1 si l'une de ses faces est dégénérée.
+fn vertex_cone(m: &HalfEdgeMesh, v: u32) -> f64 {
+    let mut normals = Vec::new();
+    for h in m.outgoing(v) {
+        let n = m.face_normal((h / 3) as usize);
+        let len = vec3::norm(n);
+        if len < 1e-12 {
+            return -1.0;
+        }
+        normals.push(vec3::scale(n, 1.0 / len));
+    }
+    vec3::cone_axis(&normals).1
+}
+
+/// Plus petit score de cône parmi `vs`.
+fn min_cone(m: &HalfEdgeMesh, vs: &[u32]) -> f64 {
+    vs.iter().map(|&v| vertex_cone(m, v)).fold(f64::INFINITY, f64::min)
+}
+
+/// Nombre de paires de faces qui se coupent parmi celles des sommets `around`, contre toutes les faces
+/// proches (sommets trouvés par `grid` dans la boîte de ces faces élargie de `pad`).
+fn local_conflicts(m: &HalfEdgeMesh, grid: &PointGrid, pad: f64, around: &[u32]) -> usize {
+    let faces_of = |v: u32| m.outgoing(v).into_iter().map(|h| (h / 3) as usize);
+    let mut touched: Vec<usize> = around
+        .iter()
+        .filter(|&&v| m.vertex_alive[v as usize])
+        .flat_map(|&v| faces_of(v))
+        .collect();
+    touched.sort_unstable();
+    touched.dedup();
+    let pts: Vec<Vec3> = touched
+        .iter()
+        .flat_map(|&f| m.faces[f].map(|v| m.pos[v as usize]))
+        .collect();
+    if pts.is_empty() {
+        return 0;
+    }
+    let bbox = Aabb::of_points(&pts);
+    let mut faces = touched.clone();
+    grid.visit_box(vec3::sub(bbox.min, [pad; 3]), vec3::add(bbox.max, [pad; 3]), |v| {
+        if m.vertex_alive[v as usize] {
+            faces.extend(faces_of(v));
+        }
+    });
+    faces.sort_unstable();
+    faces.dedup();
+    let mut map = std::collections::HashMap::new();
+    let mut pos = Vec::new();
+    let local: Vec<[u32; 3]> = faces
+        .iter()
+        .map(|&f| {
+            m.faces[f].map(|v| {
+                *map.entry(v).or_insert_with(|| {
+                    pos.push(m.pos[v as usize]);
+                    pos.len() as u32 - 1
+                })
+            })
+        })
+        .collect();
+    let mesh = TriMesh::new(pos, local).expect("faces vivantes");
+    let ids: Vec<u32> = touched.iter().map(|f| faces.binary_search(f).unwrap() as u32).collect();
+    self_intersections_among(&mesh, &ids).len()
+}
+
+/// Ouvre le cône de décalage des sommets « plissés » : ceux dont aucune direction ne fait un cosinus d'au
+/// moins `min_cos` avec toutes les faces incidentes (somme des angles bien au-delà de 360°, faces incidentes
+/// opposées), où tout décalage de la surface, si petit soit-il, croise ses propres faces. Les positions ne
+/// changent pas : on bascule d'abord, une à une, les arêtes du sommet qui améliorent le plus petit score de
+/// cône des quatre sommets concernés ; s'il reste plissé, on fusionne l'arête voisine (extrémité ou milieu) qui
+/// relève le plus le pire score du voisinage (link condition : topologie conservée). Aucune opération
+/// n'augmente le nombre d'auto-intersections de son voisinage. Rend la surface et le nombre de sommets
+/// encore plissés.
+pub fn open_cones(mesh: &TriMesh, min_cos: f64, passes: usize) -> Result<(TriMesh, usize), NotClosedManifold> {
+    let mut m = HalfEdgeMesh::from_mesh(mesh)?;
+    // Une fusion ne déplace un sommet que d'une arête au plus : la grille des positions initiales, élargie
+    // de deux arêtes, retrouve toutes les faces proches.
+    let pad = 2.0 * m.edges().into_iter().map(|h| m.edge_length(h)).fold(0.0, f64::max);
+    let grid = PointGrid::new(&m.pos, pad.max(1e-6));
+    let pleated = |m: &HalfEdgeMesh| -> Vec<u32> {
+        m.vertices()
+            .into_iter()
+            .filter(|&v| vertex_cone(m, v) < min_cos)
+            .collect()
+    };
+    for _ in 0..passes {
+        let bad = pleated(&m);
+        if bad.is_empty() {
+            break;
+        }
+        for v in bad {
+            if !m.vertex_alive[v as usize] || vertex_cone(&m, v) >= min_cos {
+                continue;
+            }
+            // Bascules : on retient à chaque tour celle qui relève le plus le pire des quatre sommets.
+            for _ in 0..m.valence(v) {
+                let mut best: Option<(u32, f64)> = None;
+                for h in m.outgoing(v) {
+                    let g = m.twin(h);
+                    let quad = [m.from(h), m.to(h), m.to(m.next(h)), m.to(m.next(g))];
+                    if m.valence(quad[0]) <= 3 || m.valence(quad[1]) <= 3 {
+                        continue;
+                    }
+                    let before = min_cone(&m, &quad);
+                    let conflicts = local_conflicts(&m, &grid, pad, &quad);
+                    let f1 = h / 3;
+                    if !m.flip(h) {
+                        continue;
+                    }
+                    let after = min_cone(&m, &quad);
+                    let safe = after > before + 1e-9 && local_conflicts(&m, &grid, pad, &quad) <= conflicts;
+                    // Retour : la nouvelle arête (d, c) est la deuxième demi-arête de la face (a, d, c).
+                    let back = m.flip(3 * f1 + 1);
+                    debug_assert!(back);
+                    if safe && best.is_none_or(|(_, b)| after - before > b) {
+                        best = Some((h, after - before));
+                    }
+                }
+                match best {
+                    Some((h, _)) => {
+                        m.flip(h);
+                    }
+                    None => break,
+                }
+                if vertex_cone(&m, v) >= min_cos {
+                    break;
+                }
+            }
+            if vertex_cone(&m, v) >= min_cos {
+                continue;
+            }
+            // Fusion d'une arête du sommet (le pli touche souvent deux ou trois sommets voisins) : chaque
+            // extrémité et le milieu sont essayés, la fusion n'est retenue que si elle relève le pire score
+            // du voisinage.
+            let ring: Vec<u32> = std::iter::once(v)
+                .chain(m.neighbors(v).into_iter().flat_map(|w| m.neighbors(w)))
+                .collect();
+            let worst_of = |m: &HalfEdgeMesh| {
+                ring.iter()
+                    .filter(|&&u| m.vertex_alive[u as usize])
+                    .map(|&u| vertex_cone(m, u))
+                    .fold(f64::INFINITY, f64::min)
+            };
+            let current = worst_of(&m);
+            let conflicts = local_conflicts(&m, &grid, pad, &ring);
+            let mut best: Option<(HalfEdgeMesh, f64)> = None;
+            for w in m.neighbors(v) {
+                for h in m.outgoing(w).into_iter().chain(m.outgoing(v)) {
+                    if !m.can_collapse(h) {
+                        continue;
+                    }
+                    let (a, b) = (m.pos[m.from(h) as usize], m.pos[m.to(h) as usize]);
+                    for p in [a, b, vec3::lerp(a, b, 0.5)] {
+                        let mut trial = m.clone();
+                        trial.collapse(h, p);
+                        let score = worst_of(&trial);
+                        if score > current + 1e-9
+                            && best.as_ref().is_none_or(|(_, s)| score > *s)
+                            && local_conflicts(&trial, &grid, pad, &ring) <= conflicts
+                        {
+                            best = Some((trial, score));
+                        }
+                    }
+                }
+            }
+            if let Some((trial, _)) = best {
+                m = trial;
+            }
+        }
+    }
+    let remaining = pleated(&m).len();
+    Ok((m.to_mesh(), remaining))
+}
+
 /// Fusionne les arêtes plus courtes que `min_len` (sous la link condition, sans retourner de face) :
 /// supprime les amas de micro-triangles sans changer la topologie. Peut créer des intersections, à
 /// réparer ensuite.
@@ -307,6 +481,27 @@ mod tests {
         s.vertices_mut()[nb[0][0] as usize] = vec3::lerp(q, s.vertices()[0], 1.6);
         let (r, remaining) = unfold(&s, -0.5, 5).unwrap();
         assert_eq!(remaining, 0);
+        assert!(topology_report(&r).is_sphere_like());
+    }
+
+    #[test]
+    fn cone_ouvert_d_un_sommet_plisse() {
+        // Sommet plissé : un voisin est tiré à travers le sommet, une partie de ses faces se retourne et aucune
+        // direction ne s'éloigne de toutes.
+        let mut s = icosphere(3, 10.0);
+        let nb = surfoxide_core::adjacency::vertex_neighbors(&s);
+        let q = s.vertices()[nb[0][0] as usize];
+        s.vertices_mut()[nb[0][0] as usize] = vec3::lerp(q, s.vertices()[0], 1.6);
+        let score = |m: &TriMesh, v: usize| {
+            let vf = surfoxide_core::adjacency::vertex_faces(m);
+            let fn_ = surfoxide_core::adjacency::face_normals(m);
+            vec3::cone_axis(&vf[v].iter().map(|&f| fn_[f as usize]).collect::<Vec<_>>()).1
+        };
+        let n_bad = |m: &TriMesh| (0..m.n_vertices()).filter(|&v| score(m, v) < 0.05).count();
+        assert!(n_bad(&s) > 0, "le cas d'essai doit contenir un sommet plissé");
+        let (r, remaining) = open_cones(&s, 0.05, 5).unwrap();
+        assert_eq!(remaining, 0);
+        assert_eq!(n_bad(&r), 0);
         assert!(topology_report(&r).is_sphere_like());
     }
 

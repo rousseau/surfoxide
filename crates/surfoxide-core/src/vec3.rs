@@ -67,3 +67,34 @@ pub fn lerp(a: Vec3, b: Vec3, t: f64) -> Vec3 {
 pub fn triangle_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
     cross(sub(b, a), sub(c, a))
 }
+
+/// Axe du cône des vecteurs unitaires `normals` : direction qui maximise le plus petit cosinus avec eux, et ce
+/// cosinus (positif si toutes les normales sont à angle aigu de l'axe). Approché par montée vers la normale la
+/// plus défavorable, à pas décroissant, depuis leur moyenne et depuis chacune d'elles.
+pub fn cone_axis(normals: &[Vec3]) -> (Vec3, f64) {
+    let worst = |d: Vec3| {
+        normals
+            .iter()
+            .map(|&n| (n, dot(d, n)))
+            .fold(([0.0; 3], f64::INFINITY), |a, b| if b.1 < a.1 { b } else { a })
+    };
+    let mean = normalize(normals.iter().fold([0.0; 3], |a, &n| add(a, n)));
+    let mut best = (mean, f64::NEG_INFINITY);
+    for start in std::iter::once(mean).chain(normals.iter().copied()) {
+        let mut d = start;
+        let mut step = 0.3;
+        for _ in 0..60 {
+            let (w, c) = worst(d);
+            if c > best.1 {
+                best = (d, c);
+            }
+            d = normalize(add(d, scale(w, step)));
+            step *= 0.93;
+        }
+        let c = worst(d).1;
+        if c > best.1 {
+            best = (d, c);
+        }
+    }
+    best
+}

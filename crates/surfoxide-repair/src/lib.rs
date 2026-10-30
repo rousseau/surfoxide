@@ -163,8 +163,9 @@ pub fn repair_intersections(mesh: &mut TriMesh, max_rounds: usize) -> RepairRepo
 }
 
 /// Direction de décalage du sommet `v` : la plus proche de la normale moyenne `n` qui fasse un angle aigu
-/// (cosinus ≥ `min_cos`) avec chaque face incidente, trouvée par corrections successives. `None` si les
-/// normales des faces incidentes n'admettent pas une telle direction (pli trop aigu).
+/// (cosinus ≥ `min_cos`) avec chaque face incidente, trouvée par corrections successives ; à défaut, l'axe
+/// du cône des normales ([`vec3::cone_axis`]). `None` si les normales des faces incidentes n'admettent pas
+/// une telle direction (sommet plissé).
 pub fn cone_direction(n: Vec3, face_normals: &[Vec3], min_cos: f64) -> Option<Vec3> {
     let mut d = vec3::normalize(n);
     for _ in 0..100 {
@@ -177,7 +178,8 @@ pub fn cone_direction(n: Vec3, face_normals: &[Vec3], min_cos: f64) -> Option<Ve
         }
         d = vec3::normalize(vec3::add(d, vec3::scale(worst, min_cos - cos + 0.05)));
     }
-    None
+    let (axis, cos) = vec3::cone_axis(face_normals);
+    (cos >= min_cos).then_some(axis)
 }
 
 /// Sommets « anguleux » : la normale moyenne fait un angle de cosinus inférieur à `min_cos` avec l'une des

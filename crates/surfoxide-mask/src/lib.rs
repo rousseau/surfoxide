@@ -8,8 +8,8 @@
 //! les voxels latéralisés. Cela ferme la face médiale du masque. On garde ensuite la plus grande
 //! composante 26-connexe et on remplit ses cavités.
 //!
-//! [`white_background_contact`] contrôle la segmentation elle-même : la substance blanche n'y touche jamais
-//! le fond, sauf erreur (tissu étiqueté fond par la segmentation).
+//! [`segmentation_qc`] contrôle la segmentation elle-même : la substance blanche n'y touche jamais le fond et
+//! le cortex est bordé de LCR, sauf erreur (tissu étiqueté fond par la segmentation).
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -221,39 +221,96 @@ pub fn hemisphere_masks(labels: &Volume<i32>, table: &LabelTable, hemi: Hemisphe
     (white, cortex)
 }
 
-/// Aire (mm²) de contact entre la substance blanche latéralisée du côté `hemi` (labels [`Tissue::White`] de ce
-/// côté, sans les structures médianes) et le fond (label 0), comptée en faces de voxels.
+/// Aire de contact substance blanche–fond (mm², un hémisphère) au-delà de laquelle la segmentation est
+/// suspecte. Réglé sur la cohorte CRL2025 : aucun hémisphère BOUNTI-19 au-dessus (au plus 30 mm²).
+pub const WHITE_BACKGROUND_SUSPECT: f64 = 100.0;
+
+/// Part de la frontière externe du cortex au contact direct du fond au-delà de laquelle la segmentation est
+/// suspecte. Réglé sur la cohorte CRL2025 : au plus 0,12 pour BOUNTI-19 (médiane 0,012).
+pub const CORTEX_BACKGROUND_SUSPECT: f64 = 0.15;
+
+/// Contrôle d'une segmentation pour un hémisphère, en faces de voxels.
 ///
-/// Dans une segmentation correcte, la substance blanche est entourée de cortex, de ventricules ou de noyaux :
-/// le contact est presque nul (BOUNTI-19 sur la cohorte CRL2025 : médiane 3 mm², au plus 54 mm² pour un
-/// cerveau entier). Une région de tissu étiquetée fond par erreur le fait monter à des centaines ou des
-/// milliers de mm² (multi-BOUNTI-43 : jusqu'à 2 300 mm², corrélation de 0,93 avec le volume manquant).
-pub fn white_background_contact(labels: &Volume<i32>, table: &LabelTable, hemi: Hemisphere) -> f64 {
+/// Dans une segmentation correcte, la substance blanche est entourée de cortex, de ventricules ou de noyaux,
+/// et le cortex est bordé de LCR extra-cérébral. Du tissu étiqueté fond (label 0) par erreur se voit de deux
+/// façons :
+/// - la substance blanche latéralisée touche le fond (BOUNTI-19 sur la cohorte CRL2025 : médiane 3 mm², au
+///   plus 30 mm² par hémisphère ; multi-BOUNTI-43 : jusqu'à 1 500 mm², corrélation de 0,93 avec le volume
+///   manquant) ;
+/// - le cortex perd sa couche externe et touche le fond au lieu du LCR : la part de sa frontière externe au
+///   contact du fond, au plus 0,12 pour BOUNTI-19, monte de 0,17 à 0,43 dans les sessions multi-BOUNTI-43 qui
+///   ont perdu du cortex sans toucher à la substance blanche.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SegQc {
+    /// Contact substance blanche latéralisée–fond (mm²), sans les structures médianes.
+    pub white_background_mm2: f64,
+    /// Contact cortex–fond (mm²).
+    pub cortex_background_mm2: f64,
+    /// Contact cortex–LCR extra-cérébral (mm²).
+    pub cortex_csf_mm2: f64,
+}
+
+impl SegQc {
+    /// Part de la frontière externe du cortex (fond ou LCR) au contact du fond.
+    pub fn cortex_background_fraction(&self) -> f64 {
+        let outer = self.cortex_background_mm2 + self.cortex_csf_mm2;
+        if outer > 0.0 {
+            self.cortex_background_mm2 / outer
+        } else {
+            0.0
+        }
+    }
+
+    /// Vrai si l'un des deux critères dépasse son seuil ([`WHITE_BACKGROUND_SUSPECT`],
+    /// [`CORTEX_BACKGROUND_SUSPECT`]).
+    pub fn suspect(&self) -> bool {
+        self.white_background_mm2 > WHITE_BACKGROUND_SUSPECT
+            || self.cortex_background_fraction() > CORTEX_BACKGROUND_SUSPECT
+    }
+}
+
+/// Contrôle de la segmentation d'un hémisphère (voir [`SegQc`]).
+pub fn segmentation_qc(labels: &Volume<i32>, table: &LabelTable, hemi: Hemisphere) -> SegQc {
     let side = if hemi.is_left() { Side::Left } else { Side::Right };
-    let is_white = |l: i32| table.get(l) == Some((Tissue::White, side));
+    // 0 fond, 1 substance blanche du côté, 2 cortex du côté, 3 LCR, 4 autre.
+    let class = |l: i32| match (l, table.get(l)) {
+        (0, _) => 0u8,
+        (_, Some((Tissue::White, s))) if s == side => 1,
+        (_, Some((Tissue::CorticalGm, s))) if s == side => 2,
+        (_, Some((Tissue::Csf, _))) => 3,
+        _ => 4,
+    };
     let [nx, ny, nz] = labels.dims();
     let s = labels.spacing();
     // Aire d'une face de voxel perpendiculaire à chaque axe.
     let face = [s[1] * s[2], s[0] * s[2], s[0] * s[1]];
-    let mut area = 0.0;
+    let mut qc = SegQc {
+        white_background_mm2: 0.0,
+        cortex_background_mm2: 0.0,
+        cortex_csf_mm2: 0.0,
+    };
     for k in 0..nz {
         for j in 0..ny {
             for i in 0..nx {
-                let here = labels.get(i, j, k);
+                let here = class(labels.get(i, j, k));
                 for (a, (di, dj, dk)) in [(1, 0, 0), (0, 1, 0), (0, 0, 1)].into_iter().enumerate() {
                     let (ii, jj, kk) = (i + di, j + dj, k + dk);
                     if ii >= nx || jj >= ny || kk >= nz {
                         continue;
                     }
-                    let there = labels.get(ii, jj, kk);
-                    if (is_white(here) && there == 0) || (here == 0 && is_white(there)) {
-                        area += face[a];
+                    let there = class(labels.get(ii, jj, kk));
+                    let pair = (here.min(there), here.max(there));
+                    match pair {
+                        (0, 1) => qc.white_background_mm2 += face[a],
+                        (0, 2) => qc.cortex_background_mm2 += face[a],
+                        (2, 3) => qc.cortex_csf_mm2 += face[a],
+                        _ => {}
                     }
                 }
             }
         }
     }
-    area
+    qc
 }
 
 /// Sommets corticaux d'une surface : vrai si le voxel de cortex le plus proche est à moins de `max_dist`
@@ -408,34 +465,45 @@ mod tests {
     }
 
     #[test]
-    fn contact_substance_blanche_fond() {
-        // Boule de substance blanche gauche (5) entourée de cortex (3) : aucun contact avec le fond. On retire
-        // ensuite le cortex d'un côté : la face de substance blanche découverte touche le fond.
+    fn controle_segmentation_substance_blanche_et_cortex() {
+        // Boule de substance blanche gauche (5) dans du cortex (3), lui-même dans du LCR (1) : aucun contact
+        // avec le fond. On retire ensuite tout d'un côté : la substance blanche et le cortex touchent le fond.
         let t = LabelTable::bounti19();
-        let mut v = Volume::filled([12, 12, 12], 0i32, surfoxide_core::volume::IDENTITY);
-        for k in 0..12 {
-            for j in 0..12 {
-                for i in 0..12 {
-                    let inside = |a: usize, lo: usize, hi: usize| a >= lo && a <= hi;
-                    if inside(i, 2, 9) && inside(j, 2, 9) && inside(k, 2, 9) {
-                        v.set(i, j, k, 3);
-                    }
-                    if inside(i, 4, 7) && inside(j, 4, 7) && inside(k, 4, 7) {
+        let mut v = Volume::filled([14, 14, 14], 0i32, surfoxide_core::volume::IDENTITY);
+        let inside = |a: usize, lo: usize, hi: usize| a >= lo && a <= hi;
+        for k in 0..14 {
+            for j in 0..14 {
+                for i in 0..14 {
+                    let cube = |lo, hi| inside(i, lo, hi) && inside(j, lo, hi) && inside(k, lo, hi);
+                    if cube(5, 8) {
                         v.set(i, j, k, 5);
+                    } else if cube(3, 10) {
+                        v.set(i, j, k, 3);
+                    } else if cube(2, 11) {
+                        v.set(i, j, k, 1);
                     }
                 }
             }
         }
-        assert_eq!(white_background_contact(&v, &t, Hemisphere::Left), 0.0);
-        assert_eq!(white_background_contact(&v, &t, Hemisphere::Right), 0.0);
-        for k in 0..12 {
-            for j in 0..12 {
-                for i in 8..12 {
+        let qc = segmentation_qc(&v, &t, Hemisphere::Left);
+        assert_eq!(qc.white_background_mm2, 0.0);
+        assert_eq!(qc.cortex_background_mm2, 0.0);
+        // Faces externes du cube de cortex 8 × 8 × 8.
+        assert_eq!(qc.cortex_csf_mm2, 6.0 * 64.0);
+        assert!(!qc.suspect());
+        assert_eq!(segmentation_qc(&v, &t, Hemisphere::Right).cortex_csf_mm2, 0.0);
+        for k in 0..14 {
+            for j in 0..14 {
+                for i in 9..14 {
                     v.set(i, j, k, 0);
                 }
             }
         }
-        // Face x = 7 | 8 du cube 4 × 4 de substance blanche : 16 faces de 1 mm².
-        assert_eq!(white_background_contact(&v, &t, Hemisphere::Left), 16.0);
+        let qc = segmentation_qc(&v, &t, Hemisphere::Left);
+        // Face x = 8 | 9 du cube 4 × 4 de substance blanche : 16 faces de 1 mm².
+        assert_eq!(qc.white_background_mm2, 16.0);
+        // Cortex au contact du fond : face x = 8 | 9 hors substance blanche (64 − 16).
+        assert_eq!(qc.cortex_background_mm2, 48.0);
+        assert!(qc.suspect());
     }
 }

@@ -57,13 +57,17 @@ identique au bit près, vérifié sur 21 hémisphères) : piale à 36 SA 163 →
 (TetGen) sur notre piale + blanche, simulation complète (il faut `--mesh-spacing 0.0136`, le `a` de l'atlas :
 avec l'arête moyenne, divergence vers t ≈ 0,1), relecture et DPF* ici ; la surface simulée a des
 auto-intersections (contact par pénalité), que `surfx check` signale.
-Reste en P0 : 7 hémisphères dont la piale ne démarre pas, 2 sous le seuil de distance. Cause des 7 (octobre
-2026, reproduction sur sub-re8lj) : dès la blanche initiale, des sommets « plissés » sans cône de décalage
-(aucune direction à angle aigu avec toutes les faces incidentes ; ex. valence 12, somme des angles 582°, faces
-incidentes opposées, triangles corrects) ; tout décalage, si petit soit-il, croise leurs propres faces, et la
-réduction du décalage ne peut qu'échouer ; les lames vues ensuite sont fabriquées par les tentatives de
-sauvetage. Ni le déplacement du sommet vers le barycentre, ni une détente laplacienne sur 4 anneaux (même sans
-garde-fou) ne rendent de cône : il faudrait un remaillage local du pli (ou une correction dans le masque) ; quelques piales héritent d'une blanche déjà serrée (dégagement < 0,1 mm) ; côté gyroxide,
+Piales qui ne démarraient pas (7 hémisphères de la validation 7) : dès la blanche initiale, des sommets
+« plissés » sans cône de décalage (aucune direction à angle aigu avec toutes les faces incidentes ; ex. valence
+12, somme des angles 582°, faces incidentes opposées, triangles corrects) ; tout décalage croise leurs propres
+faces. Remède (octobre 2026) : `surfoxide_remesh::open_cones`, première reprise de la piale dans `surfx run` :
+bascules d'arêtes puis fusion d'arête (link condition), retenues si elles relèvent le pire cône du voisinage
+sans y ajouter d'auto-intersection ; l'axe du cône est calculé par `vec3::cone_axis` (max-min des cosinus,
+aussi utilisé par `cone_direction` de la piale). Sur les 7 : 6 conformes (la plupart dès l'essai 0) ; reste
+sub-ru8l4 ses-03 L (multi-BOUNTI), segmentation signalée par `segqc` (304 mm² de substance blanche au contact
+du fond), triangles quasi dégénérés autour du trou. Validation complète à refaire pour vérifier l'absence de
+régression. Reste en P0 : 2 hémisphères sous le seuil de distance (sub-wediw R, sub-jdvsc R, multi-BOUNTI) ;
+quelques piales héritent d'une blanche déjà serrée (dégagement < 0,1 mm) ; côté gyroxide,
 masque médial lu depuis `_cortex.shape.gii`, sortie GIfTI en mm et pas de temps à dériver de la qualité
 du maillage. Retour du collègue (DPF*) : améliorer l'extraction de la blanche (ondulations millimétriques
 avant 28 SA) ; α_ref à recalibrer pour les fœtus. Essai non retenu (octobre 2026, branche locale
@@ -132,9 +136,10 @@ substance blanche robuste (CCC 0,999), mais multi-BOUNTI donne une blanche plus 
 gyrification +10 % après 35 SA), un cortex plus mince (−11,5 %, CCC 0,19) et plus de bassins de DPF* (+28 %
 après 35 SA) : ne jamais mélanger les deux tables dans une analyse. Des sessions multi-BOUNTI ont du tissu
 étiqueté fond (sub-vm989, trois sessions, jusqu'à 42 mL ; sub-14k3w, sub-hkay8 ; 18 sessions > 3 mL), vérifié
-sur la T2w. Contrôle intégré : `surfoxide_mask::white_background_contact` (aire de contact substance
-blanche–fond), `surfx segqc`, et `segmentation` dans le rapport de `surfx run` (suspect au-delà de 100 mm² par
-hémisphère).
+sur la T2w ; signalé à medoxide (rousseau/medoxide#10). Contrôle intégré : `surfoxide_mask::segmentation_qc`,
+`surfx segqc`, et `segmentation` dans le rapport de `surfx run` ; suspect si la substance blanche touche le fond
+sur plus de 100 mm² par hémisphère, ou si plus de 15 % du bord externe du cortex touche le fond au lieu du LCR
+(cortex perdu). Sur la cohorte : 18/18 sessions > 3 mL signalées, aucun hémisphère BOUNTI-19.
 
 Baseline de référence pour P0 : fetpype `surface_processing` (github.com/fetpype/surface_processing).
 

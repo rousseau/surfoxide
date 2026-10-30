@@ -17,13 +17,6 @@ use surfoxide_mask::LabelTable;
 use surfoxide_pial::{pial_from_white, solve_laplace, sulcal_skeleton, Field, PialParams};
 use surfoxide_topofix::{correct_topology, Strategy};
 
-/// Aire de contact substance blanche–fond (mm², un hémisphère) au-delà de laquelle la segmentation est
-/// signalée suspecte : du tissu y est probablement étiqueté fond (voir
-/// `surfoxide_mask::white_background_contact`). Réglé sur la cohorte CRL2025 : aucun hémisphère BOUNTI-19
-/// au-dessus (au plus 30 mm²) ; 16 des 18 sessions multi-BOUNTI-43 dont plus de 3 mL de tissu est étiqueté
-/// fond sont signalées (les deux autres perdent du cortex, pas de substance blanche).
-pub const SEG_CONTACT_SUSPECT: f64 = 100.0;
-
 /// Paramètres de la surface blanche.
 #[derive(Debug, Clone, clap::Args)]
 pub struct WhiteParams {
@@ -174,6 +167,30 @@ fn unfold(mesh: &mut TriMesh) {
     }
 }
 
+/// Ouvre le cône de décalage des sommets plissés (`surfoxide_remesh::open_cones`, même seuil que la piale) ;
+/// ne garde le résultat que s'il reste (après réparation) sans intersection.
+fn open_cones(mesh: &mut TriMesh) {
+    if let Some(dir) = std::env::var_os("SURFOXIDE_DEBUG_DIR") {
+        let _ = surfoxide_io::gifti::write_surface(
+            std::path::PathBuf::from(dir).join("pleated_white.surf.gii"),
+            mesh,
+            &SurfaceMeta::default(),
+        );
+    }
+    if let Ok((mut m, remaining)) = surfoxide_remesh::open_cones(mesh, 0.05, 6) {
+        let repair = surfoxide_repair::repair_intersections(&mut m, 30);
+        if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
+            eprintln!(
+                "  cônes : {remaining} sommets plissés restants ; réparation {} → {} intersections",
+                repair.initial, repair.remaining
+            );
+        }
+        if repair.remaining == 0 {
+            *mesh = m;
+        }
+    }
+}
+
 /// Fusionne les arêtes plus courtes que `min_len` ; ne garde le résultat que s'il reste (après
 /// réparation) sans intersection.
 fn clean_short_edges(mesh: &mut TriMesh, min_len: f64) {
@@ -232,31 +249,34 @@ pub fn pial_surface(
     let mut pial = loop {
         match pial_from_white(&white.mesh, &field, &params) {
             Ok(p) => break p,
-            Err(e) if attempt < 10 && !e.blocked.is_empty() => {
+            Err(e) if attempt < 11 && !e.blocked.is_empty() => {
                 if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
                     eprintln!("piale : essai {attempt}, {} sommets bloquants", e.blocked.len());
                 }
                 match attempt {
+                    // Sommets plissés, sans cône de décalage : aucun déplacement ne les débloque, on remaille
+                    // localement le pli (bascules, fusions ; les sommets sont renumérotés).
+                    0 => open_cones(&mut white.mesh),
                     // Détente sans créer d'intersection.
-                    0 | 1 => surfoxide_repair::relax_region(
-                        &mut white.mesh,
-                        &e.blocked,
-                        2 + attempt,
-                        5 * (1 + attempt),
-                        true,
-                    ),
+                    1 | 2 => {
+                        surfoxide_repair::relax_region(&mut white.mesh, &e.blocked, 1 + attempt, 5 * attempt, true)
+                    }
                     // Amas de micro-triangles : la fusion renumérote les sommets, les indices bloquants
                     // ne valent plus ; on réessaie tel quel.
-                    2 => {
+                    3 => {
                         clean_short_edges(&mut white.mesh, 0.05);
                         unfold(&mut white.mesh);
                     }
                     // Lissage libre suivi d'une réparation (crête en lame de couteau).
-                    3..=5 => {
-                        surfoxide_repair::relax_region(&mut white.mesh, &e.blocked, 2 + attempt, 5 * attempt, false)
-                    }
+                    4..=6 => surfoxide_repair::relax_region(
+                        &mut white.mesh,
+                        &e.blocked,
+                        1 + attempt,
+                        5 * (attempt - 1),
+                        false,
+                    ),
                     // En dernier recours, on recule localement la blanche pour faire de la place.
-                    _ => shrink_locally(&mut white.mesh, &e.blocked, attempt - 4),
+                    _ => shrink_locally(&mut white.mesh, &e.blocked, attempt - 5),
                 }
                 attempt += 1;
             }
@@ -335,12 +355,13 @@ pub fn run(
     for &hemi in hemis {
         let t = Instant::now();
         let grids = hemisphere_grids(&labels, table, hemi)?;
-        // Contrôle de la segmentation elle-même : substance blanche au contact du fond.
-        let contact = surfoxide_mask::white_background_contact(&labels, table, hemi);
-        let suspect = contact > SEG_CONTACT_SUSPECT;
-        if suspect {
+        // Contrôle de la segmentation elle-même : tissu étiqueté fond.
+        let seg_qc = surfoxide_mask::segmentation_qc(&labels, table, hemi);
+        if seg_qc.suspect() {
             println!(
-                "hémisphère {hemi} : segmentation suspecte, substance blanche au contact du fond sur {contact:.0} mm² (du tissu est probablement étiqueté fond)"
+                "hémisphère {hemi} : segmentation suspecte, substance blanche au contact du fond sur {:.0} mm², {:.0} % du bord externe du cortex au contact du fond (du tissu est probablement étiqueté fond)",
+                seg_qc.white_background_mm2,
+                100.0 * seg_qc.cortex_background_fraction()
             );
         }
         let mut w = white_surface(&grids.white, params)?;
@@ -402,8 +423,11 @@ pub fn run(
         .map_err(|e| format!("{path}: {e}"))?;
         report["cortex_fraction"] = (n_cortical as f64 / cortical.len().max(1) as f64).into();
         report["segmentation"] = serde_json::json!({
-            "white_background_contact_mm2": contact,
-            "suspect": suspect,
+            "white_background_contact_mm2": seg_qc.white_background_mm2,
+            "cortex_background_contact_mm2": seg_qc.cortex_background_mm2,
+            "cortex_csf_contact_mm2": seg_qc.cortex_csf_mm2,
+            "cortex_background_fraction": seg_qc.cortex_background_fraction(),
+            "suspect": seg_qc.suspect(),
         });
         // Courbure moyenne et profondeur sulcale DPF* de la blanche (surface de référence de la DPF*).
         let curv = surfoxide_metrics::curvature(&w.mesh);
