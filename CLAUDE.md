@@ -79,8 +79,14 @@ avant 28 SA) ; α_ref à recalibrer pour les fœtus. Essai non retenu (octobre 2
 blanc ; il divise par deux les taches de la DPF* à 21 SA (HD95 0,17 → 0,30 mm) mais amincit les crêtes
 étroites en lames que le remaillage replie ou que la piale ne peut quitter (validation 8 : 379/386 et
 374/384 ; après remaillage, nouveaux échecs dès 5 pas). Un flou plus fort de la distance signée ferme les
-sillons (HD95 0,8 mm à 36 SA) ; plus de pas de Taubin ne lisse presque rien. Pistes restantes : laplacien
-épargnant les sommets de forte courbure, ou fonction implicite plus lisse (probabilités de la segmentation).
+sillons (HD95 0,8 mm à 36 SA) ; plus de pas de Taubin ne lisse presque rien. Retenu en option (novembre
+2026, `surfx run --band-in 0.25`, désactivée par défaut) : bande asymétrique, +0,8 voxel à l'extérieur et
+0,25 à l'intérieur (les crêtes ne sont plus amincies), 50 pas laplaciens. Validation 11 contre 10 : avant
+28 SA, contrat inchangé (118/118, 116/116), petites taches de DPF* 37 → 14 et bassins 16 → 11 (médianes) ;
+sur toute la cohorte 385/386 et 380/384 (4 perdus, tous ≥ 28 SA ; wediw R gagné), HD95 0,17 → 0,28 mm,
+épaisseur −3 %. À réserver à la DPF* des jeunes fœtus ; `surfx run` ne connaît pas l'âge. Pistes restantes :
+laplacien épargnant les sommets de forte courbure, ou fonction implicite plus lisse (probabilités de la
+segmentation).
 
 P1 : intégrateur ODE dans Burn, réseaux de déformation à la CoSeg (faiblement supervisés par les
 segmentations de medoxide), opérateurs différentiels, métriques (épaisseur, profondeur sulcale,

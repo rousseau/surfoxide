@@ -35,7 +35,9 @@ FETPYPE_IMAGE = "macatools/surf_proc:v0.0.1e"
 FETPYPE_LABELS = {"L": "5,7,14,16", "R": "6,8,15,17"}
 FAILED_MULTI = {("sub-cq1rl", "ses-01")}
 REPO = Path(__file__).resolve().parent.parent
-SURFX = REPO / "target/release/surfx"
+SURFX = Path(os.environ.get("SURFX", REPO / "target/release/surfx"))
+# Options supplémentaires de `surfx run` (essais de réglages).
+RUN_ARGS = os.environ.get("SURFX_RUN_ARGS", "").split()
 
 
 def seg_path(sub, ses, kind):
@@ -76,7 +78,7 @@ def surfoxide_session(out, sub, ses, ga, labels):
     seg = seg_path(sub, ses, labels)
     prefix = out / "surfoxide" / labels / f"{sub}_{ses}"
     prefix.parent.mkdir(parents=True, exist_ok=True)
-    p, secs = run([SURFX, "run", seg, "--labels", labels, "-o", prefix])
+    p, secs = run([SURFX, "run", seg, "--labels", labels, "-o", prefix, *RUN_ARGS])
     res = {"sub": sub, "ses": ses, "ga": ga, "labels": labels, "method": "surfoxide",
            "seconds": secs, "returncode": p.returncode, "log": p.stdout + p.stderr, "hemi": {}}
     for hemi in "LR":

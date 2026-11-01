@@ -29,6 +29,12 @@ pub struct WhiteParams {
     /// Pas λ de Taubin (le pas μ vaut −1,06 λ)
     #[arg(long, default_value_t = 0.5)]
     pub lambda: f64,
+    /// Lissage laplacien contraint (50 pas de λ) au lieu de Taubin : bande de +0,8 voxel à l'extérieur de
+    /// la frontière de l'objet blanc corrigé et de `band_in` voxel à l'intérieur (0,25 conseillé). Efface
+    /// les ondulations du contour de la segmentation (petites taches de DPF* divisées par 2,5 avant 28 SA),
+    /// au prix d'un HD95 de 0,28 au lieu de 0,17 mm ; à réserver à la profondeur sulcale des jeunes fœtus
+    #[arg(long)]
+    pub band_in: Option<f64>,
     /// Longueur d'arête visée par le remaillage isotrope (mm) ; 0 : pas de remaillage
     #[arg(long, default_value_t = 0.5)]
     pub edge: f64,
@@ -91,12 +97,25 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     // d'au moins 0,2 voxel, où la piale peut passer.
     let mut mesh = surfoxide_extract::marching_cubes(&c.levelset, 0.2);
     debug_topology("marching cubes", &mesh);
-    // Lissage pas à pas : un pas qui ferait se couper la surface est annulé localement.
+    // Lissage pas à pas : un pas qui ferait se couper la surface est annulé localement. Avec une bande, les
+    // sommets restent entre les centres des voxels de part et d'autre de la frontière de l'objet corrigé.
     let mut held = 0;
-    for _ in 0..params.taubin {
-        let mut trial = mesh.clone();
-        surfoxide_extract::taubin(&mut trial, 1, params.lambda, -1.06 * params.lambda);
-        held += surfoxide_repair::safe_update(&mut mesh, trial.vertices());
+    match params.band_in {
+        Some(band_in) => {
+            let phi0 = signed_distance(&c.object);
+            let (outer, inner) = (0.8 * min_spacing, band_in * min_spacing);
+            for _ in 0..50 {
+                let trial = surfoxide_extract::constrained_taubin(&mesh, &phi0, outer, inner, params.lambda, 0.0);
+                held += surfoxide_repair::safe_update(&mut mesh, &trial);
+            }
+        }
+        None => {
+            for _ in 0..params.taubin {
+                let mut trial = mesh.clone();
+                surfoxide_extract::taubin(&mut trial, 1, params.lambda, -1.06 * params.lambda);
+                held += surfoxide_repair::safe_update(&mut mesh, trial.vertices());
+            }
+        }
     }
     debug_topology("Taubin", &mesh);
     let smoothed = mesh.clone();
