@@ -234,7 +234,7 @@ pub fn pial_surface(
     );
     let (u, iters) = solve_laplace(&white.object, &domain, 1e-6, 5000);
     let field = Field::new(u);
-    let params = PialParams {
+    let mut params = PialParams {
         min_offset: args.min_offset,
         stop: args.stop,
         // Marge de 50 % sur le seuil du contrat.
@@ -243,61 +243,50 @@ pub fn pial_surface(
         min_clearance: 0.25 * surfoxide_core::adjacency::mean_edge_length(&white.mesh),
         ..PialParams::default()
     };
-    // Si quelques sommets bloquent le départ de la piale, on détend localement la surface blanche
-    // (sans intersection) et on réessaie.
-    let mut attempt = 0;
-    let mut pial = loop {
-        match pial_from_white(&white.mesh, &field, &params) {
-            Ok(p) => break p,
-            Err(e) if attempt < 11 && !e.blocked.is_empty() => {
-                if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
-                    eprintln!("piale : essai {attempt}, {} sommets bloquants", e.blocked.len());
-                }
-                match attempt {
-                    // Sommets plissés, sans cône de décalage : aucun déplacement ne les débloque, on remaille
-                    // localement le pli (bascules, fusions ; les sommets sont renumérotés).
-                    0 => open_cones(&mut white.mesh),
-                    // Détente sans créer d'intersection.
-                    1 | 2 => {
-                        surfoxide_repair::relax_region(&mut white.mesh, &e.blocked, 1 + attempt, 5 * attempt, true)
-                    }
-                    // Amas de micro-triangles : la fusion renumérote les sommets, les indices bloquants
-                    // ne valent plus ; on réessaie tel quel.
-                    3 => {
-                        clean_short_edges(&mut white.mesh, 0.05);
-                        unfold(&mut white.mesh);
-                    }
-                    // Lissage libre suivi d'une réparation (crête en lame de couteau).
-                    4..=6 => surfoxide_repair::relax_region(
-                        &mut white.mesh,
-                        &e.blocked,
-                        1 + attempt,
-                        5 * (attempt - 1),
-                        false,
-                    ),
-                    // En dernier recours, on recule localement la blanche pour faire de la place.
-                    _ => shrink_locally(&mut white.mesh, &e.blocked, attempt - 5),
-                }
-                attempt += 1;
-            }
-            Err(e) => {
-                // Diagnostic : surface blanche et sommets bloquants au moment de l'échec.
-                if let Some(dir) = std::env::var_os("SURFOXIDE_DEBUG_DIR") {
-                    let dir = std::path::PathBuf::from(dir);
-                    let _ = surfoxide_io::gifti::write_surface(
-                        dir.join("blocked_white.surf.gii"),
-                        &white.mesh,
-                        &SurfaceMeta::default(),
-                    );
-                    let _ = std::fs::write(
-                        dir.join("blocked.json"),
-                        serde_json::to_string(&e.blocked).unwrap_or_default(),
-                    );
-                }
-                return Err(e.to_string());
-            }
-        }
+    // Première passe : départ de la piale avec les reprises de la surface blanche (voir [`start_pial`]).
+    // Si la piale ne démarre pas, ou finit sous la distance minimale du contrat, seconde passe depuis la
+    // surface blanche initiale : on ouvre d'abord les cônes des sommets plissés (sans cône de décalage, aucun
+    // déplacement ne les débloque), puis les mêmes reprises. La première passe seule laisse inchangées les
+    // surfaces qu'elle suffit à traiter : ouvrir les cônes d'emblée y laisse des sommets de piale collés à la
+    // blanche. Si la seconde passe ne fait pas mieux, on garde la première.
+    let debug = std::env::var_os("SURFOXIDE_DEBUG").is_some();
+    let initial = white.mesh.clone();
+    let first = finish_pial(white, &field, &params, min_thickness);
+    let first_distance = match &first {
+        Ok((_, d)) if *d >= min_thickness => return first.map(|(p, _)| (p.0, n_skeleton, iters, p.1)),
+        Ok((_, d)) => *d,
+        Err(_) => f64::NEG_INFINITY,
     };
+    if debug {
+        match &first {
+            Ok(_) => eprintln!("piale : seconde passe, distance minimale {first_distance:.3} mm"),
+            Err(e) => eprintln!("piale : seconde passe après « {e} »"),
+        }
+    }
+    let first_white = std::mem::replace(&mut white.mesh, initial);
+    open_cones(&mut white.mesh);
+    params.cone_axis = true;
+    match finish_pial(white, &field, &params, min_thickness) {
+        Ok((p, d)) if d > first_distance => Ok((p.0, n_skeleton, iters, p.1)),
+        second => {
+            if first.is_ok() || second.is_err() {
+                white.mesh = first_white;
+            }
+            first.or(second).map(|(p, _)| (p.0, n_skeleton, iters, p.1))
+        }
+    }
+}
+
+type FinishedPial = ((surfoxide_pial::Pial, surfoxide_pial::RegularizeReport), f64);
+
+/// Piale démarrée par [`start_pial`], régularisée, et distance minimale blanche–piale obtenue.
+fn finish_pial(
+    white: &mut WhiteSurface,
+    field: &Field,
+    params: &PialParams,
+    min_thickness: f64,
+) -> Result<FinishedPial, String> {
+    let mut pial = start_pial(&mut white.mesh, field, params)?;
     // Triangles de la piale : arêtes d'au moins un quart de l'arête moyenne de la blanche, angles d'au
     // moins 10°, pour que la tétraédrisation (gyroxide) ne crée pas d'éléments dégénérés.
     let edge = surfoxide_core::adjacency::mean_edge_length(&white.mesh);
@@ -315,7 +304,55 @@ pub fn pial_surface(
     );
     // Distance minimale du contrat : les sommets blancs restés trop près de la piale reculent un peu.
     surfoxide_pial::enforce_min_distance(&mut white.mesh, &pial.mesh, 1.5 * min_thickness, 5);
-    Ok((pial, n_skeleton, iters, reg))
+    let distance = surfoxide_check::check_pair(&white.mesh, &pial.mesh, min_thickness).min_distance;
+    Ok(((pial, reg), distance))
+}
+
+/// Départ de la piale : si quelques sommets le bloquent, on détend localement la surface blanche (sans
+/// intersection) et on réessaie, puis des reprises de plus en plus fortes.
+fn start_pial(white: &mut TriMesh, field: &Field, params: &PialParams) -> Result<surfoxide_pial::Pial, String> {
+    let mut attempt = 0;
+    loop {
+        match pial_from_white(white, field, params) {
+            Ok(p) => return Ok(p),
+            Err(e) if attempt < 10 && !e.blocked.is_empty() => {
+                if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
+                    eprintln!("piale : essai {attempt}, {} sommets bloquants", e.blocked.len());
+                }
+                match attempt {
+                    // Détente sans créer d'intersection.
+                    0 | 1 => surfoxide_repair::relax_region(white, &e.blocked, 2 + attempt, 5 * (1 + attempt), true),
+                    // Amas de micro-triangles : la fusion renumérote les sommets, les indices bloquants
+                    // ne valent plus ; on réessaie tel quel.
+                    2 => {
+                        clean_short_edges(white, 0.05);
+                        unfold(white);
+                    }
+                    // Lissage libre suivi d'une réparation (crête en lame de couteau).
+                    3..=5 => surfoxide_repair::relax_region(white, &e.blocked, 2 + attempt, 5 * attempt, false),
+                    // En dernier recours, on recule localement la blanche pour faire de la place.
+                    _ => shrink_locally(white, &e.blocked, attempt - 4),
+                }
+                attempt += 1;
+            }
+            Err(e) => {
+                // Diagnostic : surface blanche et sommets bloquants au moment de l'échec.
+                if let Some(dir) = std::env::var_os("SURFOXIDE_DEBUG_DIR") {
+                    let dir = std::path::PathBuf::from(dir);
+                    let _ = surfoxide_io::gifti::write_surface(
+                        dir.join("blocked_white.surf.gii"),
+                        white,
+                        &SurfaceMeta::default(),
+                    );
+                    let _ = std::fs::write(
+                        dir.join("blocked.json"),
+                        serde_json::to_string(&e.blocked).unwrap_or_default(),
+                    );
+                }
+                return Err(e.to_string());
+            }
+        }
+    }
 }
 
 /// Recule localement la surface blanche autour des sommets bloquants, de 0,05 mm par anneau.

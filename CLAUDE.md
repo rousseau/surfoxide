@@ -60,16 +60,20 @@ auto-intersections (contact par pénalité), que `surfx check` signale.
 Piales qui ne démarraient pas (7 hémisphères de la validation 7) : dès la blanche initiale, des sommets
 « plissés » sans cône de décalage (aucune direction à angle aigu avec toutes les faces incidentes ; ex. valence
 12, somme des angles 582°, faces incidentes opposées, triangles corrects) ; tout décalage croise leurs propres
-faces. Remède (octobre 2026) : `surfoxide_remesh::open_cones`, première reprise de la piale dans `surfx run` :
-bascules d'arêtes puis fusion d'arête (link condition), retenues si elles relèvent le pire cône du voisinage
-sans y ajouter d'auto-intersection ; l'axe du cône est calculé par `vec3::cone_axis` (max-min des cosinus,
-aussi utilisé par `cone_direction` de la piale). Sur les 7 : 6 conformes (la plupart dès l'essai 0) ; reste
-sub-ru8l4 ses-03 L (multi-BOUNTI), segmentation signalée par `segqc` (304 mm² de substance blanche au contact
-du fond), triangles quasi dégénérés autour du trou. Validation complète à refaire pour vérifier l'absence de
-régression. Reste en P0 : 2 hémisphères sous le seuil de distance (sub-wediw R, sub-jdvsc R, multi-BOUNTI) ;
-quelques piales héritent d'une blanche déjà serrée (dégagement < 0,1 mm) ; côté gyroxide,
-masque médial lu depuis `_cortex.shape.gii`, sortie GIfTI en mm et pas de temps à dériver de la qualité
-du maillage. Retour du collègue (DPF*) : améliorer l'extraction de la blanche (ondulations millimétriques
+faces. Remède (novembre 2026) : seconde passe de la piale dans `surfx run`, seulement si la première (la
+séquence de reprises de la validation 7, inchangée) échoue ou finit sous l'épaisseur minimale : blanche
+initiale reprise par `surfoxide_remesh::open_cones` (bascules d'arêtes puis fusion d'arête sous link
+condition, retenues si elles relèvent le pire cône du voisinage sans y ajouter d'auto-intersection), puis
+`PialParams::cone_axis` (axe `vec3::cone_axis`, max-min des cosinus, quand la recherche depuis la normale
+échoue) ; on garde la meilleure des deux passes. Mettre `open_cones` en premier dégradait 11 hémisphères
+(décalages quasi tangents, distance minimale ~0). Validation 10 : 386/386 BOUNTI-19 et 382/384 multi-BOUNTI,
+aucun hémisphère perdu, les 761 déjà conformes identiques au bit près ; HD95 médian inchangé (0,17 et 0,19 mm).
+Échecs connus (acceptés) : sub-ru8l4 ses-03 L, segmentation signalée par `segqc` (304 mm² de substance blanche
+au contact du fond), triangles quasi dégénérés autour du trou ; sub-wediw ses-01 R, distance minimale
+0,009 mm (la seconde passe ne fait pas mieux). Reste en P0 : quelques piales héritent d'une blanche déjà
+serrée (dégagement < 0,1 mm). Côté gyroxide (`origin/main`), sortie GIfTI en mm et pas de temps tiré de la
+plus courte arête faits ; croissance suivant le champ `cortex` du `.vtu` (`--growth-field cortex`, 0 sur la
+face médiale) : rousseau/gyroxide#9, non essayée sur une session réelle. Retour du collègue (DPF*) : améliorer l'extraction de la blanche (ondulations millimétriques
 avant 28 SA) ; α_ref à recalibrer pour les fœtus. Essai non retenu (octobre 2026, branche locale
 `lissage-contraint`) : lissage laplacien contraint à une bande de ±0,8 voxel autour de la frontière de l'objet
 blanc ; il divise par deux les taches de la DPF* à 21 SA (HD95 0,17 → 0,30 mm) mais amincit les crêtes

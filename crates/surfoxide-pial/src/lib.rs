@@ -160,6 +160,9 @@ pub struct PialParams {
     /// incidente : les deux berges d'un sillon enfoui restent séparées d'au moins cette distance, sans quoi
     /// l'auto-contact d'un simulateur (gyroxide) agirait dès l'état initial. 0 : pas de contrainte.
     pub min_clearance: f64,
+    /// Si la recherche d'une direction de décalage depuis la normale échoue, prendre l'axe du cône des
+    /// normales des faces incidentes ([`vec3::cone_axis`]) quand il convient ; sinon le sommet bloque.
+    pub cone_axis: bool,
 }
 
 impl Default for PialParams {
@@ -173,6 +176,7 @@ impl Default for PialParams {
             min_distance: 0.03,
             catchup_passes: 6,
             min_clearance: 0.1,
+            cone_axis: false,
         }
     }
 }
@@ -592,7 +596,12 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
         .enumerate()
         .map(|(v, n)| {
             let fs: Vec<Vec3> = vf[v].iter().map(|&f| fnorm[f as usize]).collect();
-            cone_direction(n, &fs, 0.05).unwrap_or(n)
+            cone_direction(n, &fs, 0.05)
+                .or_else(|| {
+                    let (axis, cos) = vec3::cone_axis(&fs);
+                    (params.cone_axis && cos >= 0.05).then_some(axis)
+                })
+                .unwrap_or(n)
         })
         .collect();
     let paths: Vec<Vec<Vec3>> = white
