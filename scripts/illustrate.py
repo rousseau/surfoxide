@@ -32,7 +32,8 @@ import numpy as np
 from matplotlib.collections import LineCollection
 
 HOME = Path.home()
-SUBJECTS = HOME / "Exp/fetal-folding-geometry/data/subjects.csv"
+# Âges gestationnels et folds : $OXIDE_SUBJECTS.
+SUBJECTS = Path(os.environ.get("OXIDE_SUBJECTS", HOME / "Exp/fetal-folding-geometry/data/subjects.csv"))
 
 # Tissus regroupés (labels BOUNTI-19) et couleurs (palette catégorielle de référence, ordre fixe).
 GROUPS = [

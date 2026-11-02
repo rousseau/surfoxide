@@ -8,13 +8,12 @@
 #   bash scripts/fetch-data.sh --t2w sub-d6a1p/ses-01  # plus la T2w rééchantillonnée de ces sessions (~50 Mo chacune)
 #   bash scripts/fetch-data.sh --clean                 # supprime le dossier local
 #
-# Les données vivent dans garage:fetal-crl2025 ; ce dossier n'est qu'une copie de travail, à nettoyer après usage
+# Les données vivent sur Garage, dans $OXIDE_REMOTE/derivatives/fetal-folding-geometry ; ce dossier n'est qu'une copie de travail, à nettoyer après usage
 # (convention : rapatrier → traiter → renvoyer → nettoyer).
 
 set -euo pipefail
 
 DATA="${SURFOXIDE_DATA:-$HOME/.cache/surfoxide/data}"
-REMOTE="garage:fetal-crl2025/derivatives/fetal-folding-geometry"
 
 # Identifiants Garage, s'ils ne sont pas déjà dans l'environnement.
 if [ -r "$HOME/.config/garage/env" ]; then
@@ -23,6 +22,12 @@ if [ -r "$HOME/.config/garage/env" ]; then
   . "$HOME/.config/garage/env"
   set +a
 fi
+
+# Remote rclone et bucket (« <remote>:<bucket> »), définis hors du dépôt, en général dans ~/.config/garage/env.
+if [ "${1:-}" != "--clean" ]; then
+  : "${OXIDE_REMOTE:?à définir : remote rclone et bucket, par exemple dans ~/.config/garage/env}"
+fi
+REMOTE="${OXIDE_REMOTE:-}/derivatives/fetal-folding-geometry"
 
 case "${1:-}" in
   --clean)

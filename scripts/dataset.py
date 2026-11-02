@@ -16,7 +16,8 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-SUBJECTS = Path.home() / "Exp/fetal-folding-geometry/data/subjects.csv"
+# Âges gestationnels et folds : $OXIDE_SUBJECTS.
+SUBJECTS = Path(os.environ.get("OXIDE_SUBJECTS", Path.home() / "Exp/fetal-folding-geometry/data/subjects.csv"))
 SPLITS = {"fold_0": "train", "fold_1": "train", "fold_2": "train", "fold_3": "val", "fold_4": "test"}
 
 

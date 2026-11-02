@@ -560,11 +560,12 @@ mod tests {
     }
 
     /// Surfaces de l'atlas fœtal dHCP (écrites par gifticlib et Workbench).
+    /// Dossier : `$OXIDE_DHCP_ATLAS`, sinon `data/atlas_dhcp` du clone de gyroxide voisin de surfoxide.
     #[test]
-    #[ignore = "données locales : ~/Exp/gyroxide/data/atlas_dhcp"]
+    #[ignore = "données locales : atlas dHCP ($OXIDE_DHCP_ATLAS ou ../gyroxide/data/atlas_dhcp)"]
     fn lecture_atlas_dhcp() {
-        let home = std::env::var("HOME").unwrap();
-        let dir = format!("{home}/Exp/gyroxide/data/atlas_dhcp");
+        let dir = std::env::var("OXIDE_DHCP_ATLAS")
+            .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../../gyroxide/data/atlas_dhcp").to_string());
         let (wm, meta) = read_surface(format!("{dir}/fetal.week28.left.wm.surf.gii")).unwrap();
         assert_eq!(wm.n_vertices(), 32492);
         assert_eq!(meta.primary.as_deref(), Some("CortexLeft"));

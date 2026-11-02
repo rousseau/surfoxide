@@ -30,7 +30,8 @@ from pathlib import Path
 HOME = Path.home()
 # Segmentations rapatriées par scripts/fetch-data.sh.
 DATA = Path(os.environ.get("SURFOXIDE_DATA", HOME / ".cache/surfoxide/data"))
-SUBJECTS = HOME / "Exp/fetal-folding-geometry/data/subjects.csv"
+# Âges gestationnels et folds : $OXIDE_SUBJECTS.
+SUBJECTS = Path(os.environ.get("OXIDE_SUBJECTS", HOME / "Exp/fetal-folding-geometry/data/subjects.csv"))
 FETPYPE_IMAGE = "macatools/surf_proc:v0.0.1e"
 FETPYPE_LABELS = {"L": "5,7,14,16", "R": "6,8,15,17"}
 FAILED_MULTI = {("sub-cq1rl", "ses-01")}

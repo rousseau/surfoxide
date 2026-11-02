@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Partage entre machines des résultats de travail de surfoxide (validations, jeu d'entraînement de P1, essais) :
-# ~/scratch (ou $SURFOXIDE_SCRATCH) <-> garage:fetal-crl2025/derivatives/surfoxide, un dossier par résultat.
+# ~/scratch (ou $SURFOXIDE_SCRATCH) <-> $OXIDE_REMOTE/derivatives/surfoxide (Garage), un dossier par résultat.
 #
 # Usage :
 #   bash scripts/sync-scratch.sh list                                # dossiers présents sur Garage, avec leur taille
@@ -14,7 +14,6 @@
 set -euo pipefail
 
 SCRATCH="${SURFOXIDE_SCRATCH:-$HOME/scratch}"
-REMOTE="garage:fetal-crl2025/derivatives/surfoxide"
 
 # Identifiants Garage, s'ils ne sont pas déjà dans l'environnement.
 if [ -r "$HOME/.config/garage/env" ]; then
@@ -23,6 +22,10 @@ if [ -r "$HOME/.config/garage/env" ]; then
   . "$HOME/.config/garage/env"
   set +a
 fi
+
+# Remote rclone et bucket (« <remote>:<bucket> »), définis hors du dépôt, en général dans ~/.config/garage/env.
+: "${OXIDE_REMOTE:?à définir : remote rclone et bucket, par exemple dans ~/.config/garage/env}"
+REMOTE="$OXIDE_REMOTE/derivatives/surfoxide"
 
 usage() {
   echo "usage : $0 list | pull <dossier>... | pull --all | push <dossier>... | push --all" >&2
