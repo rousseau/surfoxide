@@ -174,5 +174,9 @@ Baseline de référence pour P0 : fetpype `surface_processing` (github.com/fetpy
 - Données réelles (hors Git) : bucket `garage:fetal-crl2025`, dérivées dans
   `derivatives/fetal-folding-geometry/<sub>/<ses>/anat/` (BOUNTI-19, multi-BOUNTI-43, T2w rééchantillonnée
   à 0,5 mm). `bash scripts/fetch-data.sh` les rapatrie dans `$SURFOXIDE_DATA` (défaut
-  `~/.cache/surfoxide/data`) pour les tests ignorés, la validation et les figures. Âges gestationnels :
+  `~/.cache/surfoxide/data`) pour les tests ignorés, la validation et les figures.
+- Résultats de travail partagés entre machines (validations, jeu d'entraînement de P1, essais) :
+  `garage:fetal-crl2025/derivatives/surfoxide/<dossier>`, miroir de `~/scratch/<dossier>` (ou
+  `$SURFOXIDE_SCRATCH`) ; `bash scripts/sync-scratch.sh list | pull <dossier>… | push <dossier>…` (copie sans
+  suppression, jamais les `target-*`). Toute nouvelle validation ou tout nouveau jeu se pousse une fois terminé. Âges gestationnels :
   `~/Exp/fetal-folding-geometry/data/subjects.csv`. Atlas fœtal dHCP (GIfTI) : `~/Exp/gyroxide/data/atlas_dhcp/`.
