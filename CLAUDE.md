@@ -158,25 +158,27 @@ Baseline de référence pour P0 : fetpype `surface_processing` (github.com/fetpy
 - Workspace Cargo ; dépendances partagées dans `[workspace.dependencies]`, `Cargo.lock` versionné.
 - Burn 0.22 (`default-features = false`) ; même version que medoxide pour un futur binaire commun.
 - CPU par défaut avec le backend `flex` (déterministe, utilisé par les tests) ; GPU par les features
-  `cuda` (PC Linux RTX 2080 Ti) ou `wgpu` (Mac).
+  `cuda` (NVIDIA) ou `wgpu` (Metal sur Mac, Vulkan sous Linux).
 - `surfoxide-core` reste sans Burn ni format de fichier ; un crate par module ; `surfx` est la CLI.
 - Pas de dépendance sans code qui l'utilise.
 - Commentaires, documentation, messages d'erreur et noms de tests en français.
 - Avant chaque commit : `cargo fmt`, `cargo clippy --all-targets`, `cargo test --release`.
 
-## Machines
+## Environnement
 
-- Développement (CPU et GPU) : PC Linux, Ubuntu x86_64, RTX 2080 Ti (11 Go, Turing sm_75 : f32 et f16,
-  pas de bf16), 12 cœurs, 64 Go. Installation : `scripts/setup-linux.sh` (CUDA Toolkit seul, version
-  plafonnée par le pilote).
-- Machine WSL (RTX 3080, alias ssh `sshwsl`) : secondaire, pas toujours allumée ; `scripts/setup-wsl.sh`.
-- La compilation `--features cuda` télécharge un paquet LLVM (~45 Mo) dans `~/.cache/tracel/`.
-- Données réelles (hors Git) : bucket `garage:fetal-crl2025`, dérivées dans
-  `derivatives/fetal-folding-geometry/<sub>/<ses>/anat/` (BOUNTI-19, multi-BOUNTI-43, T2w rééchantillonnée
-  à 0,5 mm). `bash scripts/fetch-data.sh` les rapatrie dans `$SURFOXIDE_DATA` (défaut
-  `~/.cache/surfoxide/data`) pour les tests ignorés, la validation et les figures.
+- Le code doit compiler et passer ses tests sur macOS arm64, Linux x86_64 et Linux aarch64. Les machines,
+  leurs accès et la règle de passage de l'une à l'autre sont décrits hors de ce dépôt.
+- `--features cuda` télécharge au premier build un paquet LLVM de Tracel (~45 Mo). Sous Linux aarch64, lier
+  avec `lld` (`-C link-arg=-fuse-ld=lld`) : le lieur GNU ne résout pas les symboles de ce LLVM statique.
+- Installation d'un PC Linux x86_64 avec GPU NVIDIA : `scripts/setup-linux.sh` (CUDA Toolkit seul, version
+  plafonnée par le pilote) ; sous WSL : `scripts/setup-wsl.sh`.
+- Données réelles (hors Git), sur Garage sous `$OXIDE_REMOTE` (remote rclone et bucket, définis hors du dépôt,
+  en général dans `~/.config/garage/env`) : `derivatives/fetal-folding-geometry/<sub>/<ses>/anat/`
+  (BOUNTI-19, multi-BOUNTI-43, T2w rééchantillonnée à 0,5 mm). `bash scripts/fetch-data.sh` les rapatrie dans
+  `$SURFOXIDE_DATA` (défaut `~/.cache/surfoxide/data`) pour les tests ignorés, la validation et les figures.
 - Résultats de travail partagés entre machines (validations, jeu d'entraînement de P1, essais) :
-  `garage:fetal-crl2025/derivatives/surfoxide/<dossier>`, miroir de `~/scratch/<dossier>` (ou
-  `$SURFOXIDE_SCRATCH`) ; `bash scripts/sync-scratch.sh list | pull <dossier>… | push <dossier>…` (copie sans
-  suppression, jamais les `target-*`). Toute nouvelle validation ou tout nouveau jeu se pousse une fois terminé. Âges gestationnels :
-  `~/Exp/fetal-folding-geometry/data/subjects.csv`. Atlas fœtal dHCP (GIfTI) : `~/Exp/gyroxide/data/atlas_dhcp/`.
+  `$OXIDE_REMOTE/derivatives/surfoxide/<dossier>`, miroir de `~/scratch/<dossier>` (ou `$SURFOXIDE_SCRATCH`) ;
+  `bash scripts/sync-scratch.sh list | pull <dossier>… | push <dossier>…` (copie sans suppression, jamais les
+  `target-*`). Toute nouvelle validation ou tout nouveau jeu se pousse une fois terminé.
+- Âges gestationnels et folds : `$OXIDE_SUBJECTS` (défaut `~/Exp/fetal-folding-geometry/data/subjects.csv`).
+  Atlas fœtal dHCP (GIfTI) : `$OXIDE_DHCP_ATLAS` (défaut `data/atlas_dhcp/` du clone de gyroxide voisin).
