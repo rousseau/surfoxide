@@ -127,6 +127,7 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
         }
     }
     let mut repair = surfoxide_repair::repair_intersections(&mut mesh, 30);
+    debug_topology("remaillage", &mesh);
     // Le contrat d'abord : si le remaillage ou la réparation échoue, on garde la surface lissée (saine)
     // non remaillée.
     let remesh_dropped = remesh_failed || repair.remaining > 0;
@@ -140,6 +141,11 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     unfold(&mut mesh);
     debug_topology("micro-arêtes et plis", &mesh);
     surfoxide_repair::relax_sharp_vertices(&mut mesh, 0.1, 20);
+    // Le lissage répété d'un petit voisinage le contracte parfois en amas de micro-arêtes (0,02 mm sur une
+    // segmentation de la RTX), que la piale hérite : sa plus courte arête fixe le pas de temps de gyroxide.
+    // On les fusionne jusqu'au quart de l'arête, le seuil de la régularisation de la piale.
+    clean_short_edges(&mut mesh, 0.25 * params.edge.max(0.5));
+    debug_topology("détente des sommets aigus", &mesh);
     Ok(WhiteSurface {
         mesh,
         object: c.object,
@@ -157,16 +163,26 @@ fn debug_topology(step: &str, mesh: &TriMesh) {
     if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
         let r = surfoxide_core::topology_report(mesh);
         eprintln!(
-            "  après {step} : V={} χ={} composantes={} bords={} arêtes non variété={} sommets non variété={} orientation incohérente={}",
+            "  après {step} : V={} χ={} composantes={} bords={} arêtes non variété={} sommets non variété={} orientation incohérente={} arête min {:.3} mm",
             r.n_vertices,
             r.euler_characteristic,
             r.components,
             r.boundary_edges,
             r.non_manifold_edges,
             r.non_manifold_vertices,
-            r.inconsistent_edges
+            r.inconsistent_edges,
+            min_edge_length(mesh)
         );
     }
+}
+
+/// Plus courte arête (mm).
+fn min_edge_length(mesh: &TriMesh) -> f64 {
+    let v = mesh.vertices();
+    surfoxide_core::adjacency::edges(mesh)
+        .iter()
+        .map(|&[a, b]| surfoxide_core::vec3::dist(v[a as usize], v[b as usize]))
+        .fold(f64::INFINITY, f64::min)
 }
 
 /// Déplie les plis (faces voisines de normales opposées) ; ne garde le résultat que s'il reste (après

@@ -71,7 +71,13 @@ aucun hémisphère perdu, les 761 déjà conformes identiques au bit près ; HD9
 Échecs connus (acceptés) : sub-ru8l4 ses-03 L, segmentation signalée par `segqc` (304 mm² de substance blanche
 au contact du fond), triangles quasi dégénérés autour du trou ; sub-wediw ses-01 R, distance minimale
 0,009 mm (la seconde passe ne fait pas mieux). Reste en P0 : quelques piales héritent d'une blanche déjà
-serrée (dégagement < 0,1 mm). Côté gyroxide (`origin/main`), sortie GIfTI en mm et pas de temps tiré de la
+serrée (dégagement < 0,1 mm). Micro-arêtes (novembre 2026, benchmark de la suite sur trois machines) : la détente des sommets aigus de
+la blanche (`relax_sharp_vertices`, laplacien local répété 20 fois) contractait parfois un voisinage en amas
+d'arêtes de 0,02 mm, que la piale héritait (arête min 0,011 mm, dégagement 0,003 mm) ; la plus courte arête de
+la piale fixe le pas de temps de gyroxide (12 fois plus de pas). Remède : fusion des arêtes de moins d'un quart
+de l'arête visée (`clean_short_edges`, seuil de la régularisation de la piale) après la détente ; sur ce cas,
+arête min de la piale 0,133 mm et dégagement 0,129 mm, l'autre hémisphère identique au bit près. Validation 12
+à faire (contre la 10). Côté gyroxide (`origin/main`), sortie GIfTI en mm et pas de temps tiré de la
 plus courte arête faits ; croissance suivant le champ `cortex` du `.vtu` (`--growth-field cortex`, 0 sur la
 face médiale) : rousseau/gyroxide#9, non essayée sur une session réelle. Retour du collègue (DPF*) : améliorer l'extraction de la blanche (ondulations millimétriques
 avant 28 SA) ; α_ref à recalibrer pour les fœtus. Essai non retenu (octobre 2026, branche locale
