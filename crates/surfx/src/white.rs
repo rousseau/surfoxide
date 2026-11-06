@@ -227,10 +227,31 @@ fn open_cones(mesh: &mut TriMesh) {
 }
 
 /// Fusionne les arêtes plus courtes que `min_len` ; ne garde le résultat que s'il reste (après
-/// réparation) sans intersection.
+/// réparation) sans intersection. Les arêtes que la link condition empêche de fusionner (amas de
+/// micro-triangles) sont reprises par `surfoxide_remesh::untangle_short_edges`, avec le même contrôle ; une
+/// surface sans arête courte n'est pas touchée par cette reprise.
 fn clean_short_edges(mesh: &mut TriMesh, min_len: f64) {
     if let Ok(mut m) = surfoxide_remesh::collapse_short_edges(mesh, min_len) {
         if surfoxide_repair::repair_intersections(&mut m, 30).remaining == 0 {
+            *mesh = m;
+        }
+    }
+    if min_edge_length(mesh) >= min_len {
+        return;
+    }
+    // Même seuil de cône que la piale : la reprise ne doit pas créer de sommet plissé.
+    if let Ok((mut m, remaining)) = surfoxide_remesh::untangle_short_edges(mesh, min_len, 0.05, 5) {
+        let repair = surfoxide_repair::repair_intersections(&mut m, 30);
+        if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
+            eprintln!(
+                "  arêtes courtes démêlées : {remaining} restantes, arête min {:.4} → {:.4} mm ; réparation {} → {}",
+                min_edge_length(mesh),
+                min_edge_length(&m),
+                repair.initial,
+                repair.remaining
+            );
+        }
+        if repair.remaining == 0 {
             *mesh = m;
         }
     }
@@ -337,6 +358,7 @@ fn finish_pial(
             rounds: 50,
         },
     );
+    surfoxide_pial::debug_edges("régularisation", &pial.mesh, &white.mesh, 0.25 * edge);
     // Distance minimale du contrat : les sommets blancs restés trop près de la piale reculent un peu.
     surfoxide_pial::enforce_min_distance(&mut white.mesh, &pial.mesh, 1.5 * min_thickness, 5);
     let distance = surfoxide_check::check_pair(&white.mesh, &pial.mesh, min_thickness).min_distance;
@@ -367,6 +389,11 @@ fn start_pial(white: &mut TriMesh, field: &Field, params: &PialParams) -> Result
                     3..=5 => surfoxide_repair::relax_region(white, &e.blocked, 2 + attempt, 5 * attempt, false),
                     // En dernier recours, on recule localement la blanche pour faire de la place.
                     _ => shrink_locally(white, &e.blocked, attempt - 4),
+                }
+                // Les détentes contractent parfois l'amas en micro-arêtes, que la piale hériterait.
+                let short = 0.25 * surfoxide_core::adjacency::mean_edge_length(white);
+                if min_edge_length(white) < short {
+                    clean_short_edges(white, short);
                 }
                 attempt += 1;
             }

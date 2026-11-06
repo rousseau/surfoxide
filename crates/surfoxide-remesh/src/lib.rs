@@ -409,6 +409,153 @@ pub fn open_cones(mesh: &TriMesh, min_cos: f64, passes: usize) -> Result<(TriMes
     Ok((m.to_mesh(), remaining))
 }
 
+/// Plus courte arête parmi celles des sommets `vs` (vivants).
+fn min_edge_around(m: &HalfEdgeMesh, vs: &[u32]) -> f64 {
+    vs.iter()
+        .filter(|&&v| m.vertex_alive[v as usize])
+        .flat_map(|&v| m.outgoing(v))
+        .map(|h| m.edge_length(h))
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// Fusionne `h` en `p` sur une copie, si la link condition le permet.
+fn try_collapse(m: &HalfEdgeMesh, h: u32, p: Vec3) -> Option<HalfEdgeMesh> {
+    if !m.face_alive[(h / 3) as usize] || !m.can_collapse(h) {
+        return None;
+    }
+    let mut t = m.clone();
+    t.collapse(h, p);
+    Some(t)
+}
+
+/// Fusions de `h` possibles sur une copie : vers chaque extrémité et vers le milieu.
+fn collapses(m: &HalfEdgeMesh, h: u32) -> Vec<HalfEdgeMesh> {
+    let (a, b) = (m.pos[m.from(h) as usize], m.pos[m.to(h) as usize]);
+    [vec3::lerp(a, b, 0.5), a, b]
+        .into_iter()
+        .filter_map(|p| try_collapse(m, h, p))
+        .collect()
+}
+
+/// Demi-arête de `a` vers `b`, si elles sont voisines.
+fn half_edge(m: &HalfEdgeMesh, a: u32, b: u32) -> Option<u32> {
+    if !m.vertex_alive[a as usize] || !m.vertex_alive[b as usize] {
+        return None;
+    }
+    m.outgoing(a).into_iter().find(|&h| m.to(h) == b)
+}
+
+/// Supprime les arêtes plus courtes que `min_len` que [`collapse_short_edges`] laisse : celles dont la fusion
+/// directe est refusée par la link condition (les deux sommets ont un troisième voisin commun, ou un sommet
+/// opposé de valence 3), souvent dans un amas de micro-triangles. Pour chaque arête courte, de la plus courte à
+/// la plus longue, on essaie sa fusion (milieu ou extrémités), puis une opération préalable sur une arête
+/// voisine (bascule, ou fusion qui supprime un sommet de valence 3 ou un voisin commun) suivie de sa fusion. Un
+/// essai n'est retenu que s'il allonge la plus courte arête du voisinage, garde à chaque sommet du voisinage un
+/// cône de décalage d'au moins `min(min_cos, score d'avant)` (aucune face retournée) et n'augmente pas le
+/// nombre d'auto-intersections locales ; parmi les essais retenus, celui dont la plus courte arête locale est
+/// la plus longue. Topologie conservée. Rend la surface et le nombre d'arêtes encore trop courtes ; une
+/// surface sans arête courte est rendue telle quelle.
+pub fn untangle_short_edges(
+    mesh: &TriMesh,
+    min_len: f64,
+    min_cos: f64,
+    passes: usize,
+) -> Result<(TriMesh, usize), NotClosedManifold> {
+    let short = |m: &HalfEdgeMesh| -> Vec<u32> {
+        let mut s: Vec<(f64, u32)> = m
+            .edges()
+            .into_iter()
+            .map(|h| (m.edge_length(h), h))
+            .filter(|&(l, _)| l < min_len)
+            .collect();
+        s.sort_by(|x, y| x.0.total_cmp(&y.0));
+        s.into_iter().map(|(_, h)| h).collect()
+    };
+    let mut m = HalfEdgeMesh::from_mesh(mesh)?;
+    if short(&m).is_empty() {
+        return Ok((mesh.clone(), 0));
+    }
+    let pad = 2.0 * m.edges().into_iter().map(|h| m.edge_length(h)).fold(0.0, f64::max);
+    let grid = PointGrid::new(&m.pos, pad.max(1e-6));
+    for _ in 0..passes {
+        let todo = short(&m);
+        if todo.is_empty() {
+            break;
+        }
+        let mut changed = false;
+        // Les indices de demi-arêtes changent avec les opérations : on suit chaque arête par ses sommets.
+        let pairs: Vec<(u32, u32)> = todo.iter().map(|&h| (m.from(h), m.to(h))).collect();
+        for (a, b) in pairs {
+            let Some(h) = half_edge(&m, a, b) else { continue };
+            if m.edge_length(h) >= min_len {
+                continue;
+            }
+            // Voisinage : les deux sommets et leurs deux premiers anneaux.
+            let mut ring: Vec<u32> = vec![a, b];
+            for _ in 0..2 {
+                let more: Vec<u32> = ring.iter().flat_map(|&v| m.neighbors(v)).collect();
+                ring.extend(more);
+                ring.sort_unstable();
+                ring.dedup();
+            }
+            let edge_before = min_edge_around(&m, &ring);
+            let cone_floor = min_cone(&m, &ring).min(min_cos);
+            let conflicts = local_conflicts(&m, &grid, pad, &ring);
+            let mut trials = collapses(&m, h);
+            // Opérations préalables sur les arêtes des faces autour de a et b.
+            let mut around: Vec<(u32, u32)> = [a, b]
+                .iter()
+                .flat_map(|&v| m.outgoing(v))
+                .flat_map(|e| [e, m.next(e), m.prev(e)])
+                .map(|e| {
+                    let (x, y) = (m.from(e), m.to(e));
+                    (x.min(y), x.max(y))
+                })
+                .filter(|&(x, y)| (x, y) != (a.min(b), a.max(b)))
+                .collect();
+            around.sort_unstable();
+            around.dedup();
+            for (x, y) in around {
+                let Some(e) = half_edge(&m, x, y) else { continue };
+                let mut first: Vec<HalfEdgeMesh> = Vec::new();
+                let mut flipped = m.clone();
+                if flipped.flip(e) {
+                    first.push(flipped);
+                }
+                first.extend(collapses(&m, e));
+                for t in first {
+                    // Si a ou b a disparu dans la fusion préalable, l'arête est déjà supprimée.
+                    match half_edge(&t, a, b) {
+                        Some(g) => trials.extend(collapses(&t, g)),
+                        None => trials.push(t),
+                    }
+                }
+            }
+            let mut best: Option<(HalfEdgeMesh, f64)> = None;
+            for t in trials {
+                let live: Vec<u32> = ring.iter().copied().filter(|&v| t.vertex_alive[v as usize]).collect();
+                let edge = min_edge_around(&t, &live);
+                if edge <= edge_before + 1e-12 || best.as_ref().is_some_and(|(_, e)| edge <= *e) {
+                    continue;
+                }
+                if min_cone(&t, &live) < cone_floor || local_conflicts(&t, &grid, pad, &live) > conflicts {
+                    continue;
+                }
+                best = Some((t, edge));
+            }
+            if let Some((t, _)) = best {
+                m = t;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let remaining = short(&m).len();
+    Ok((m.to_mesh(), remaining))
+}
+
 /// Fusionne les arêtes plus courtes que `min_len` (sous la link condition, sans retourner de face) :
 /// supprime les amas de micro-triangles sans changer la topologie. Peut créer des intersections, à
 /// réparer ensuite.
@@ -503,6 +650,50 @@ mod tests {
         assert_eq!(remaining, 0);
         assert_eq!(n_bad(&r), 0);
         assert!(topology_report(&r).is_sphere_like());
+    }
+
+    #[test]
+    fn arete_courte_bloquee_par_la_link_condition() {
+        // Face (x, y, z) dont l'arête x–y est rapprochée à 0,01 mm, puis un sommet de valence 3 inséré dans
+        // la face : x et y ont trois voisins communs (le sommet inséré, z et le sommet opposé), la fusion
+        // directe de x–y est refusée.
+        let s = icosphere(3, 10.0);
+        let [x, y, z] = s.faces()[0];
+        let mut v = s.vertices().to_vec();
+        let (px, py) = (v[x as usize], v[y as usize]);
+        v[y as usize] = vec3::add(px, vec3::scale(vec3::normalize(vec3::sub(py, px)), 0.01));
+        let c = vec3::scale(
+            vec3::add(vec3::add(v[x as usize], v[y as usize]), v[z as usize]),
+            1.0 / 3.0,
+        );
+        let n = v.len() as u32;
+        v.push(c);
+        let mut f = s.faces().to_vec();
+        f[0] = [x, y, n];
+        f.extend([[y, z, n], [z, x, n]]);
+        let m = TriMesh::new(v, f).unwrap();
+        let min_edge = |m: &TriMesh| {
+            let v = m.vertices();
+            edges(m)
+                .iter()
+                .map(|&[a, b]| vec3::dist(v[a as usize], v[b as usize]))
+                .fold(f64::INFINITY, f64::min)
+        };
+        let collapsed = collapse_short_edges(&m, 0.1).unwrap();
+        assert!(
+            min_edge(&collapsed) < 0.1,
+            "le cas d'essai doit résister à la fusion directe"
+        );
+        let (r, remaining) = untangle_short_edges(&collapsed, 0.1, 0.05, 5).unwrap();
+        assert_eq!(remaining, 0);
+        assert!(min_edge(&r) >= 0.1, "{}", min_edge(&r));
+        assert!(topology_report(&r).is_sphere_like());
+        assert!(surfoxide_check::self_intersections(&r).is_empty());
+        // Sans arête courte, la surface est rendue telle quelle.
+        let (same, k) = untangle_short_edges(&s, 0.1, 0.05, 5).unwrap();
+        assert_eq!(k, 0);
+        assert_eq!(same.vertices(), s.vertices());
+        assert_eq!(same.faces(), s.faces());
     }
 
     #[test]

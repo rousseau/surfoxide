@@ -585,6 +585,30 @@ fn clearances(mesh: &TriMesh, eps: f64) -> Vec<f64> {
     clearance_with_faces(mesh).into_iter().map(|(d, _)| d).collect()
 }
 
+/// Avec `SURFOXIDE_DEBUG`, affiche la plus courte arête de `mesh` après une étape de la piale, le nombre
+/// d'arêtes sous `short` et la longueur de cette arête sur `white` (même triangulation).
+pub fn debug_edges(step: &str, mesh: &TriMesh, white: &TriMesh, short: f64) {
+    if std::env::var_os("SURFOXIDE_DEBUG").is_none() {
+        return;
+    }
+    let (v, w) = (mesh.vertices(), white.vertices());
+    let (mut n, mut best) = (0, (f64::INFINITY, 0u32, 0u32));
+    for [a, b] in surfoxide_core::adjacency::edges(mesh) {
+        let l = vec3::dist(v[a as usize], v[b as usize]);
+        n += (l < short) as usize;
+        if l < best.0 {
+            best = (l, a, b);
+        }
+    }
+    let (l, a, b) = best;
+    eprintln!(
+        "  piale, {step} : arête min {l:.4} mm ({a}–{b}, {:.4} mm sur la blanche, déplacements {:.3} et {:.3} mm), {n} arêtes < {short:.3} mm",
+        vec3::dist(w[a as usize], w[b as usize]),
+        vec3::dist(v[a as usize], w[a as usize]),
+        vec3::dist(v[b as usize], w[b as usize]),
+    );
+}
+
 /// Construit la piale à partir de la surface blanche `white` (fermée, sans auto-intersection) et du champ.
 pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> Result<Pial, PialError> {
     // Normales prises dans le cône des normales des faces incidentes : au droit d'un pli, un décalage le
@@ -626,21 +650,60 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
     for (i, p) in pial.vertices_mut().iter_mut().enumerate() {
         *p = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i]));
     }
+    let short = 0.25 * surfoxide_core::adjacency::mean_edge_length(white);
+    debug_edges("blanche d'entrée", white, white, short);
+    debug_edges("décalage initial complet", &pial, white, short);
+    // Au fond d'un creux serré, les normales convergent : le décalage raccourcit les arêtes (0,20 mm sur la
+    // blanche, 0,03 mm sur la piale). Une arête plus courte que `min_clearance` est un dégagement trop
+    // faible que la progression ne peut plus corriger (tout pas qui le réduit est refusé) et dont la plus
+    // courte arête fixe le pas de temps de gyroxide : le décalage de ses sommets est réduit de moitié, sans
+    // descendre sous 1,5 × `min_distance` (en dessous, la piale resterait collée à la blanche).
+    let white_edges: Vec<([u32; 2], f64)> = surfoxide_core::adjacency::edges(white)
+        .into_iter()
+        .map(|[a, b]| {
+            (
+                [a, b],
+                vec3::dist(white.vertices()[a as usize], white.vertices()[b as usize]),
+            )
+        })
+        .collect();
+    let floor = 1.5 * params.min_distance;
+    let shrunk = |pial: &TriMesh, offset: &[f64]| -> std::collections::HashSet<u32> {
+        let v = pial.vertices();
+        white_edges
+            .iter()
+            .filter(|&&([a, b], lw)| {
+                let l = vec3::dist(v[a as usize], v[b as usize]);
+                l < params.min_clearance && l < lw
+            })
+            .flat_map(|&([a, b], _)| [a, b])
+            .filter(|&i| offset[i as usize] > floor)
+            .collect()
+    };
     let mut bad = conflicting_vertices(&pial, Some(white));
+    let mut short_ends = shrunk(&pial, &offset);
     let mut attempt = 0;
-    while !bad.is_empty() && attempt < HALVINGS {
+    while (!bad.is_empty() || !short_ends.is_empty()) && attempt < HALVINGS {
         let mut region: std::collections::HashSet<u32> = bad.clone();
         region.extend(bad.iter().flat_map(|&v| ring[v as usize].iter().copied()));
         for &v in &region {
             offset[v as usize] /= 2.0;
         }
+        for &v in short_ends.difference(&region) {
+            offset[v as usize] = (offset[v as usize] / 2.0).max(floor);
+        }
         for (i, p) in pial.vertices_mut().iter_mut().enumerate() {
             *p = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i]));
         }
         bad = conflicting_vertices(&pial, Some(white));
+        short_ends = shrunk(&pial, &offset);
         attempt += 1;
         if debug {
-            eprintln!("décalage initial, essai {attempt} : {} sommets en conflit", bad.len());
+            eprintln!(
+                "décalage initial, essai {attempt} : {} sommets en conflit, {} aux arêtes raccourcies",
+                bad.len(),
+                short_ends.len()
+            );
         }
     }
     if !bad.is_empty() && debug {
@@ -702,6 +765,7 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
             blocked,
         });
     }
+    debug_edges("décalage initial réduit", &pial, white, short);
     // Progression par pas le long des lignes de courant.
     let mut reached = offset.clone();
     for k in 1..=params.flow_steps {
@@ -722,6 +786,7 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
             }
         }
     }
+    debug_edges("progression", &pial, white, short);
     // Rattrapage dans les sillons étroits : un sommet retenu tente la moitié du chemin qui lui reste, puis,
     // s'il est encore bloqué, une fraction deux fois plus petite ; ses voisins arrivés entre-temps ont
     // souvent libéré la place.
@@ -752,6 +817,7 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
             }
         }
     }
+    debug_edges("rattrapage", &pial, white, short);
     let missing: Vec<f64> = (0..white.n_vertices())
         .map(|i| (full[i] - reached[i]).max(0.0))
         .collect();
