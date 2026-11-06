@@ -79,9 +79,22 @@ de l'arête visée (`clean_short_edges`, seuil de la régularisation de la piale
 arête min de la piale 0,133 mm et dégagement 0,129 mm, l'autre hémisphère identique au bit près. Validation 12
 (PGX, contre la 10) : 386/386 et 383/384 (sub-wediw ses-01 R gagné, aucun perdu), 369 et 230 rapports identiques,
 HD95 et épaisseur médians inchangés ; piales dont l'arête min est < 0,05 mm : 1 → 1 (BOUNTI-19) et 69 → 18
-(multi-BOUNTI) ; 6 hémisphères multi-BOUNTI dégradés (arête min jusqu'à 0,003 mm, contrat respecté). Reste en P0 :
-ces arêtes courtes naissent dans la piale elle-même, surtout multi-BOUNTI après 32 SA (des dizaines de milliers de
-sommets retenus), que la régularisation ne corrige pas ; piste : fusion d'arête simultanée sur la blanche et la piale. Côté gyroxide (`origin/main`), sortie GIfTI en mm et pas de temps tiré de la
+(multi-BOUNTI) ; 6 hémisphères multi-BOUNTI dégradés (arête min jusqu'à 0,003 mm, contrat respecté). Diagnostic
+(SURFOXIDE_DEBUG, 19 cas) : 17 arêtes courtes venaient d'amas de micro-arêtes de la blanche que la link condition
+empêche de fusionner, les autres du décalage initial dans des concavités serrées (normales convergentes) ; la
+progression ne raccourcit rien (dégagement minimal = seuil d'arête courte) et la régularisation ne bouge pas les
+sommets figés sous la distance minimale. Remède (novembre 2026) : `surfoxide_remesh::untangle_short_edges` sur la
+blanche après la détente et après chaque reprise (bascule ou fusion voisine puis fusion de l'arête courte, retenue
+si elle relève l'arête min locale sans abîmer cône ni intersections) ; décalage initial réduit aux extrémités des
+arêtes qu'il raccourcit sous le seuil (plancher 1,5 × distance minimale) ; repli sur la blanche d'avant le
+démêlage si la piale finit sous l'épaisseur minimale (sub-rag2a ses-01 R). Validation 13 (PGX, contre la 12,
+`scripts/compare_validations.py`) : 386/386 et 383/384, aucun perdu, 370 et 266 rapports identiques, HD95 et
+épaisseur médians inchangés ; piales d'arête min < 0,05 mm : 1 → 0 et 18 → 1 (sub-ru8l4 ses-03 L, hors contrat),
+< 0,1 mm : 3 → 1 et 36 → 14 (q1 multi-BOUNTI 0,013 → 0,076 mm) ; dégagement en baisse sur 2 hémisphères, contrat
+respecté (sub-5ksd1 ses-01 L BOUNTI-19 0,014 → 0,0003 mm, sub-jkq1g ses-02 R 0,129 → 0,044 mm). Restent entre
+0,05 et 0,1 mm des arêtes de la blanche que le démêlage ne retire pas (kvbr9, z067x) et des plis si aigus que
+l'arête diminue de moitié même au plancher du décalage (yp2at, srxv8) ; piste : fusion d'arête simultanée sur la
+blanche et la piale. Côté gyroxide (`origin/main`), sortie GIfTI en mm et pas de temps tiré de la
 plus courte arête faits ; croissance suivant le champ `cortex` du `.vtu` (`--growth-field cortex`, 0 sur la
 face médiale) : rousseau/gyroxide#9, non essayée sur une session réelle. Retour du collègue (DPF*) : améliorer l'extraction de la blanche (ondulations millimétriques
 avant 28 SA) ; α_ref à recalibrer pour les fœtus. Essai non retenu (octobre 2026, branche locale
