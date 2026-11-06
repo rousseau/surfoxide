@@ -6,7 +6,7 @@ Pour une session par semaine d'âge gestationnel (BOUNTI-19) : `surfx run` (WM e
 cortex pour la piale). fetpype (image docker macatools/surf_proc:v0.0.1e) est lancé sur les mêmes
 sessions et évalué de la même façon. Quelques sessions multi-BOUNTI-43 complètent.
 
-Données : `bash scripts/fetch-data.sh` (segmentations dans $SURFOXIDE_DATA, par défaut
+Données : `bash scripts/fetch-data.sh` (segmentations et `subjects.csv` dans $SURFOXIDE_DATA, par défaut
 ~/.cache/surfoxide/data).
 
 Usage :
@@ -30,8 +30,8 @@ from pathlib import Path
 HOME = Path.home()
 # Segmentations rapatriées par scripts/fetch-data.sh.
 DATA = Path(os.environ.get("SURFOXIDE_DATA", HOME / ".cache/surfoxide/data"))
-# Âges gestationnels et folds : $OXIDE_SUBJECTS.
-SUBJECTS = Path(os.environ.get("OXIDE_SUBJECTS", HOME / "Exp/fetal-folding-geometry/data/subjects.csv"))
+# Âges gestationnels et folds de la cohorte, rapatriés avec les segmentations ; $OXIDE_SUBJECTS pour un autre fichier.
+SUBJECTS = Path(os.environ.get("OXIDE_SUBJECTS", DATA / "subjects.csv"))
 FETPYPE_IMAGE = "macatools/surf_proc:v0.0.1e"
 FETPYPE_LABELS = {"L": "5,7,14,16", "R": "6,8,15,17"}
 FAILED_MULTI = {("sub-cq1rl", "ses-01")}
@@ -47,9 +47,16 @@ def seg_path(sub, ses, kind):
 
 def all_sessions():
     """Toutes les sessions dont la segmentation BOUNTI-19 existe, triées par AG."""
-    rows = csv.DictReader(open(SUBJECTS))
+    if not SUBJECTS.exists():
+        sys.exit(f"erreur : {SUBJECTS} absent ; lancer bash scripts/fetch-data.sh")
+    rows = list(csv.DictReader(open(SUBJECTS)))
+    missing = {"subject_id", "session_id", "ga_weeks"} - set(rows[0] if rows else {})
+    if missing:
+        sys.exit(f"erreur : {SUBJECTS} vide ou sans les colonnes {', '.join(sorted(missing))}")
     out = [(r["subject_id"], r["session_id"], float(r["ga_weeks"])) for r in rows
            if seg_path(r["subject_id"], r["session_id"], "bounti19").exists()]
+    if not out:
+        sys.exit(f"erreur : aucune segmentation BOUNTI-19 de {SUBJECTS} dans {DATA} ; lancer bash scripts/fetch-data.sh")
     return sorted(out, key=lambda s: (s[2], s[0], s[1]))
 
 

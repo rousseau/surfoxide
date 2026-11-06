@@ -16,8 +16,10 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-# Âges gestationnels et folds : $OXIDE_SUBJECTS.
-SUBJECTS = Path(os.environ.get("OXIDE_SUBJECTS", Path.home() / "Exp/fetal-folding-geometry/data/subjects.csv"))
+# Segmentations rapatriées par scripts/fetch-data.sh.
+DATA = Path(os.environ.get("SURFOXIDE_DATA", Path.home() / ".cache/surfoxide/data"))
+# Âges gestationnels et folds de la cohorte, rapatriés avec les segmentations ; $OXIDE_SUBJECTS pour un autre fichier.
+SUBJECTS = Path(os.environ.get("OXIDE_SUBJECTS", DATA / "subjects.csv"))
 SPLITS = {"fold_0": "train", "fold_1": "train", "fold_2": "train", "fold_3": "val", "fold_4": "test"}
 
 
@@ -25,7 +27,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--surfaces", type=Path, required=True, help="dossier <labels>/<sub>_<ses>_hemi-X_* d'une validation")
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--data", type=Path, default=Path(os.environ.get("SURFOXIDE_DATA", Path.home() / ".cache/surfoxide/data")))
+    ap.add_argument("--data", type=Path, default=DATA)
     ap.add_argument("--surfx", type=Path, default=Path(__file__).resolve().parent.parent / "target/release/surfx")
     ap.add_argument("--jobs", type=int, default=8)
     args = ap.parse_args()

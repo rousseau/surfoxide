@@ -180,5 +180,6 @@ Baseline de référence pour P0 : fetpype `surface_processing` (github.com/fetpy
   `$OXIDE_REMOTE/derivatives/surfoxide/<dossier>`, miroir de `~/scratch/<dossier>` (ou `$SURFOXIDE_SCRATCH`) ;
   `bash scripts/sync-scratch.sh list | pull <dossier>… | push <dossier>…` (copie sans suppression, jamais les
   `target-*`). Toute nouvelle validation ou tout nouveau jeu se pousse une fois terminé.
-- Âges gestationnels et folds : `$OXIDE_SUBJECTS` (défaut `~/Exp/fetal-folding-geometry/data/subjects.csv`).
+- Âges gestationnels et folds : `subjects.csv`, rangé sur Garage avec les segmentations et rapatrié avec elles
+  dans `$SURFOXIDE_DATA` (`$OXIDE_SUBJECTS` pour un autre fichier).
   Atlas fœtal dHCP (GIfTI) : `$OXIDE_DHCP_ATLAS` (défaut `data/atlas_dhcp/` du clone de gyroxide voisin).

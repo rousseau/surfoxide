@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rapatrie depuis Garage les segmentations (BOUNTI-19 et multi-BOUNTI-43) utilisées par les tests sur
 # données réelles, la validation et les figures, dans $SURFOXIDE_DATA (par défaut ~/.cache/surfoxide/data),
-# rangées en <sub>/<ses>/anat/.
+# rangées en <sub>/<ses>/anat/, et subjects.csv (âges gestationnels et folds de la cohorte) à la racine.
 #
 # Usage :
 #   bash scripts/fetch-data.sh                         # segmentations des 193 sessions (~165 Mo)
@@ -52,7 +52,13 @@ case "${1:-}" in
 esac
 
 rclone copy "$REMOTE/" "$DATA/" \
+  --include "/subjects.csv" \
   --include "*_res-0p5mm_desc-bounti19_dseg.nii.gz" \
   --include "*_res-0p5mm_desc-multibounti43_dseg.nii.gz"
 n=$(find "$DATA" -name "*_dseg.nii.gz" | wc -l)
 echo "$n segmentations dans $DATA"
+if [ -s "$DATA/subjects.csv" ]; then
+  echo "âges gestationnels et folds : $DATA/subjects.csv ($(($(wc -l <"$DATA/subjects.csv") - 1)) sessions)"
+else
+  echo "attention : $REMOTE/subjects.csv absent (âges gestationnels et folds, lus par scripts/*.py)" >&2
+fi

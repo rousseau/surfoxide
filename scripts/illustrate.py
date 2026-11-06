@@ -32,8 +32,10 @@ import numpy as np
 from matplotlib.collections import LineCollection
 
 HOME = Path.home()
-# Âges gestationnels et folds : $OXIDE_SUBJECTS.
-SUBJECTS = Path(os.environ.get("OXIDE_SUBJECTS", HOME / "Exp/fetal-folding-geometry/data/subjects.csv"))
+# Segmentations et T2w rapatriées par scripts/fetch-data.sh.
+DATA = Path(os.environ.get("SURFOXIDE_DATA", HOME / ".cache/surfoxide/data"))
+# Âges gestationnels et folds de la cohorte, rapatriés avec les segmentations ; $OXIDE_SUBJECTS pour un autre fichier.
+SUBJECTS = Path(os.environ.get("OXIDE_SUBJECTS", DATA / "subjects.csv"))
 
 # Tissus regroupés (labels BOUNTI-19) et couleurs (palette catégorielle de référence, ordre fixe).
 GROUPS = [
@@ -186,7 +188,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("sessions", nargs="+", help="sub-XX/ses-YY")
     ap.add_argument("--data", type=Path,
-                    default=Path(os.environ.get("SURFOXIDE_DATA", HOME / ".cache/surfoxide/data")),
+                    default=DATA,
                     help="dossier <sub>/<ses>/anat/ (T2w, BOUNTI) ; défaut : $SURFOXIDE_DATA")
     ap.add_argument("--surfaces", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
