@@ -77,7 +77,11 @@ d'arêtes de 0,02 mm, que la piale héritait (arête min 0,011 mm, dégagement 0
 la piale fixe le pas de temps de gyroxide (12 fois plus de pas). Remède : fusion des arêtes de moins d'un quart
 de l'arête visée (`clean_short_edges`, seuil de la régularisation de la piale) après la détente ; sur ce cas,
 arête min de la piale 0,133 mm et dégagement 0,129 mm, l'autre hémisphère identique au bit près. Validation 12
-à faire (contre la 10). Côté gyroxide (`origin/main`), sortie GIfTI en mm et pas de temps tiré de la
+(PGX, contre la 10) : 386/386 et 383/384 (sub-wediw ses-01 R gagné, aucun perdu), 369 et 230 rapports identiques,
+HD95 et épaisseur médians inchangés ; piales dont l'arête min est < 0,05 mm : 1 → 1 (BOUNTI-19) et 69 → 18
+(multi-BOUNTI) ; 6 hémisphères multi-BOUNTI dégradés (arête min jusqu'à 0,003 mm, contrat respecté). Reste en P0 :
+ces arêtes courtes naissent dans la piale elle-même, surtout multi-BOUNTI après 32 SA (des dizaines de milliers de
+sommets retenus), que la régularisation ne corrige pas ; piste : fusion d'arête simultanée sur la blanche et la piale. Côté gyroxide (`origin/main`), sortie GIfTI en mm et pas de temps tiré de la
 plus courte arête faits ; croissance suivant le champ `cortex` du `.vtu` (`--growth-field cortex`, 0 sur la
 face médiale) : rousseau/gyroxide#9, non essayée sur une session réelle. Retour du collègue (DPF*) : améliorer l'extraction de la blanche (ondulations millimétriques
 avant 28 SA) ; α_ref à recalibrer pour les fœtus. Essai non retenu (octobre 2026, branche locale
