@@ -653,57 +653,78 @@ pub fn pial_from_white(white: &TriMesh, field: &Field, params: &PialParams) -> R
     let short = 0.25 * surfoxide_core::adjacency::mean_edge_length(white);
     debug_edges("blanche d'entrée", white, white, short);
     debug_edges("décalage initial complet", &pial, white, short);
-    // Au fond d'un creux serré, les normales convergent : le décalage raccourcit les arêtes (0,20 mm sur la
-    // blanche, 0,03 mm sur la piale). Une arête plus courte que `min_clearance` est un dégagement trop
-    // faible que la progression ne peut plus corriger (tout pas qui le réduit est refusé) et dont la plus
-    // courte arête fixe le pas de temps de gyroxide : le décalage de ses sommets est réduit de moitié, sans
-    // descendre sous 1,5 × `min_distance` (en dessous, la piale resterait collée à la blanche).
-    let white_edges: Vec<([u32; 2], f64)> = surfoxide_core::adjacency::edges(white)
-        .into_iter()
-        .map(|[a, b]| {
-            (
-                [a, b],
-                vec3::dist(white.vertices()[a as usize], white.vertices()[b as usize]),
-            )
-        })
-        .collect();
-    let floor = 1.5 * params.min_distance;
-    let shrunk = |pial: &TriMesh, offset: &[f64]| -> std::collections::HashSet<u32> {
-        let v = pial.vertices();
-        white_edges
-            .iter()
-            .filter(|&&([a, b], lw)| {
-                let l = vec3::dist(v[a as usize], v[b as usize]);
-                l < params.min_clearance && l < lw
-            })
-            .flat_map(|&([a, b], _)| [a, b])
-            .filter(|&i| offset[i as usize] > floor)
-            .collect()
-    };
     let mut bad = conflicting_vertices(&pial, Some(white));
-    let mut short_ends = shrunk(&pial, &offset);
     let mut attempt = 0;
-    while (!bad.is_empty() || !short_ends.is_empty()) && attempt < HALVINGS {
+    while !bad.is_empty() && attempt < HALVINGS {
         let mut region: std::collections::HashSet<u32> = bad.clone();
         region.extend(bad.iter().flat_map(|&v| ring[v as usize].iter().copied()));
         for &v in &region {
             offset[v as usize] /= 2.0;
         }
-        for &v in short_ends.difference(&region) {
-            offset[v as usize] = (offset[v as usize] / 2.0).max(floor);
-        }
         for (i, p) in pial.vertices_mut().iter_mut().enumerate() {
             *p = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i]));
         }
         bad = conflicting_vertices(&pial, Some(white));
-        short_ends = shrunk(&pial, &offset);
         attempt += 1;
         if debug {
-            eprintln!(
-                "décalage initial, essai {attempt} : {} sommets en conflit, {} aux arêtes raccourcies",
-                bad.len(),
-                short_ends.len()
-            );
+            eprintln!("décalage initial, essai {attempt} : {} sommets en conflit", bad.len());
+        }
+    }
+    // Au fond d'un creux serré, les normales convergent : le décalage raccourcit les arêtes (0,20 mm sur la
+    // blanche, 0,03 mm sur la piale). Une arête plus courte que `min_clearance` est un dégagement trop
+    // faible que la progression ne peut plus corriger (tout pas qui le réduit est refusé) et dont la plus
+    // courte arête fixe le pas de temps de gyroxide. Une fois le décalage sans conflit, celui des sommets de
+    // ces arêtes est réduit de moitié, sans descendre sous 1,5 × `min_distance` (en dessous, la piale resterait
+    // collée à la blanche) ; une réduction qui crée un conflit est annulée et met fin à la reprise.
+    if bad.is_empty() && params.min_clearance > 0.0 {
+        let floor = 1.5 * params.min_distance;
+        let white_edges: Vec<([u32; 2], f64)> = surfoxide_core::adjacency::edges(white)
+            .into_iter()
+            .map(|[a, b]| {
+                (
+                    [a, b],
+                    vec3::dist(white.vertices()[a as usize], white.vertices()[b as usize]),
+                )
+            })
+            .collect();
+        for _ in 0..HALVINGS {
+            let v = pial.vertices();
+            let ends: std::collections::HashSet<u32> = white_edges
+                .iter()
+                .filter(|&&([a, b], lw)| {
+                    let l = vec3::dist(v[a as usize], v[b as usize]);
+                    l < params.min_clearance && l < lw
+                })
+                .flat_map(|&([a, b], _)| [a, b])
+                .filter(|&i| offset[i as usize] > floor)
+                .collect();
+            if ends.is_empty() {
+                break;
+            }
+            let previous = offset.clone();
+            for &i in &ends {
+                offset[i as usize] = (offset[i as usize] / 2.0).max(floor);
+            }
+            for &i in &ends {
+                let i = i as usize;
+                pial.vertices_mut()[i] = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i]));
+            }
+            let conflicts = conflicting_vertices(&pial, Some(white));
+            if debug {
+                eprintln!(
+                    "décalage initial, arêtes raccourcies : {} sommets réduits, {} conflits",
+                    ends.len(),
+                    conflicts.len()
+                );
+            }
+            if !conflicts.is_empty() {
+                offset = previous;
+                for &i in &ends {
+                    let i = i as usize;
+                    pial.vertices_mut()[i] = vec3::add(white.vertices()[i], vec3::scale(normals[i], offset[i]));
+                }
+                break;
+            }
         }
     }
     if !bad.is_empty() && debug {

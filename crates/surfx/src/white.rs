@@ -86,6 +86,9 @@ pub struct WhiteSurface {
     pub repair: surfoxide_repair::RepairReport,
     /// Remaillage abandonné (réparation impossible) : surface lissée non remaillée.
     pub remesh_dropped: bool,
+    /// Surface d'avant le démêlage des arêtes courtes (`surfoxide_remesh::untangle_short_edges`), s'il l'a
+    /// changée : la piale y revient si elle échoue sur la surface démêlée.
+    pub tangled: Option<TriMesh>,
 }
 
 /// Surface blanche de genre 0 du masque `mask` (recadré avec une marge).
@@ -137,14 +140,19 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     }
     // Amas de micro-triangles, puis plis aigus : gênent le décalage de la piale et trahissent un artefact
     // local.
-    clean_short_edges(&mut mesh, 0.1 * params.edge.max(0.5));
+    clean_short_edges(&mut mesh, 0.1 * params.edge.max(0.5), false);
     unfold(&mut mesh);
     debug_topology("micro-arêtes et plis", &mesh);
     surfoxide_repair::relax_sharp_vertices(&mut mesh, 0.1, 20);
     // Le lissage répété d'un petit voisinage le contracte parfois en amas de micro-arêtes (0,02 mm sur une
     // segmentation de la RTX), que la piale hérite : sa plus courte arête fixe le pas de temps de gyroxide.
     // On les fusionne jusqu'au quart de l'arête, le seuil de la régularisation de la piale.
-    clean_short_edges(&mut mesh, 0.25 * params.edge.max(0.5));
+    // Les amas que la link condition empêche de fusionner sont ensuite démêlés ; la surface d'avant est
+    // gardée pour la piale.
+    let short = 0.25 * params.edge.max(0.5);
+    clean_short_edges(&mut mesh, short, false);
+    let before = mesh.clone();
+    let tangled = untangle_short_edges(&mut mesh, short).then_some(before);
     debug_topology("détente des sommets aigus", &mesh);
     Ok(WhiteSurface {
         mesh,
@@ -155,6 +163,7 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
         held,
         repair,
         remesh_dropped,
+        tangled,
     })
 }
 
@@ -227,17 +236,27 @@ fn open_cones(mesh: &mut TriMesh) {
 }
 
 /// Fusionne les arêtes plus courtes que `min_len` ; ne garde le résultat que s'il reste (après
-/// réparation) sans intersection. Les arêtes que la link condition empêche de fusionner (amas de
-/// micro-triangles) sont reprises par `surfoxide_remesh::untangle_short_edges`, avec le même contrôle ; une
-/// surface sans arête courte n'est pas touchée par cette reprise.
-fn clean_short_edges(mesh: &mut TriMesh, min_len: f64) {
+/// réparation) sans intersection. Avec `untangle`, les arêtes que la link condition empêche de fusionner
+/// (amas de micro-triangles) sont reprises par `surfoxide_remesh::untangle_short_edges`, avec le même
+/// contrôle ; une surface sans arête courte n'est pas touchée par cette reprise. Pas avant le dépliage : la
+/// reprise y change la surface que le dépliage traite et l'a fait échouer (validation 13, deux hémisphères
+/// perdus).
+fn clean_short_edges(mesh: &mut TriMesh, min_len: f64, untangle: bool) {
     if let Ok(mut m) = surfoxide_remesh::collapse_short_edges(mesh, min_len) {
         if surfoxide_repair::repair_intersections(&mut m, 30).remaining == 0 {
             *mesh = m;
         }
     }
+    if untangle {
+        untangle_short_edges(mesh, min_len);
+    }
+}
+
+/// Démêle les arêtes plus courtes que `min_len` laissées par la fusion (`surfoxide_remesh::untangle_short_edges`) ;
+/// ne garde le résultat que s'il reste (après réparation) sans intersection. Rend vrai si la surface a changé.
+fn untangle_short_edges(mesh: &mut TriMesh, min_len: f64) -> bool {
     if min_edge_length(mesh) >= min_len {
-        return;
+        return false;
     }
     // Même seuil de cône que la piale : la reprise ne doit pas créer de sommet plissé.
     if let Ok((mut m, remaining)) = surfoxide_remesh::untangle_short_edges(mesh, min_len, 0.05, 5) {
@@ -253,8 +272,10 @@ fn clean_short_edges(mesh: &mut TriMesh, min_len: f64) {
         }
         if repair.remaining == 0 {
             *mesh = m;
+            return true;
         }
     }
+    false
 }
 
 /// Piale et champ d'épaisseur, à partir de la surface blanche.
@@ -290,7 +311,7 @@ pub fn pial_surface(
     );
     let (u, iters) = solve_laplace(&white.object, &domain, 1e-6, 5000);
     let field = Field::new(u);
-    let mut params = PialParams {
+    let params = PialParams {
         min_offset: args.min_offset,
         stop: args.stop,
         // Marge de 50 % sur le seuil du contrat.
@@ -299,17 +320,47 @@ pub fn pial_surface(
         min_clearance: 0.25 * surfoxide_core::adjacency::mean_edge_length(&white.mesh),
         ..PialParams::default()
     };
-    // Première passe : départ de la piale avec les reprises de la surface blanche (voir [`start_pial`]).
-    // Si la piale ne démarre pas, ou finit sous la distance minimale du contrat, seconde passe depuis la
-    // surface blanche initiale : on ouvre d'abord les cônes des sommets plissés (sans cône de décalage, aucun
-    // déplacement ne les débloque), puis les mêmes reprises. La première passe seule laisse inchangées les
-    // surfaces qu'elle suffit à traiter : ouvrir les cônes d'emblée y laisse des sommets de piale collés à la
-    // blanche. Si la seconde passe ne fait pas mieux, on garde la première.
+    let first = two_passes(white, &field, &params, min_thickness, true);
+    // Repli : si la piale échoue ou finit sous la distance minimale sur la blanche démêlée, mêmes passes
+    // sur la blanche d'avant le démêlage (sans démêlage dans les reprises) ; on garde la meilleure.
+    let distance = |r: &Result<FinishedPial, String>| r.as_ref().map_or(f64::NEG_INFINITY, |(_, d)| *d);
+    let result = match white.tangled.take() {
+        Some(tangled) if distance(&first) < min_thickness => {
+            if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
+                eprintln!("piale : reprise sur la blanche d'avant le démêlage");
+            }
+            let untangled = std::mem::replace(&mut white.mesh, tangled);
+            let second = two_passes(white, &field, &params, min_thickness, false);
+            if distance(&second) > distance(&first) {
+                second
+            } else {
+                white.mesh = untangled;
+                first
+            }
+        }
+        _ => first,
+    };
+    result.map(|(p, _)| (p.0, n_skeleton, iters, p.1))
+}
+
+/// Première passe : départ de la piale avec les reprises de la surface blanche (voir [`start_pial`]). Si la
+/// piale ne démarre pas, ou finit sous la distance minimale du contrat, seconde passe depuis la surface blanche
+/// initiale : on ouvre d'abord les cônes des sommets plissés (sans cône de décalage, aucun déplacement ne les
+/// débloque), puis les mêmes reprises. La première passe seule laisse inchangées les surfaces qu'elle suffit à
+/// traiter : ouvrir les cônes d'emblée y laisse des sommets de piale collés à la blanche. Si la seconde passe
+/// ne fait pas mieux, on garde la première. `untangle` : démêlage des arêtes courtes après les reprises.
+fn two_passes(
+    white: &mut WhiteSurface,
+    field: &Field,
+    params: &PialParams,
+    min_thickness: f64,
+    untangle: bool,
+) -> Result<FinishedPial, String> {
     let debug = std::env::var_os("SURFOXIDE_DEBUG").is_some();
     let initial = white.mesh.clone();
-    let first = finish_pial(white, &field, &params, min_thickness);
+    let first = finish_pial(white, field, params, min_thickness, untangle);
     let first_distance = match &first {
-        Ok((_, d)) if *d >= min_thickness => return first.map(|(p, _)| (p.0, n_skeleton, iters, p.1)),
+        Ok((_, d)) if *d >= min_thickness => return first,
         Ok((_, d)) => *d,
         Err(_) => f64::NEG_INFINITY,
     };
@@ -321,14 +372,17 @@ pub fn pial_surface(
     }
     let first_white = std::mem::replace(&mut white.mesh, initial);
     open_cones(&mut white.mesh);
-    params.cone_axis = true;
-    match finish_pial(white, &field, &params, min_thickness) {
-        Ok((p, d)) if d > first_distance => Ok((p.0, n_skeleton, iters, p.1)),
+    let params = PialParams {
+        cone_axis: true,
+        ..*params
+    };
+    match finish_pial(white, field, &params, min_thickness, untangle) {
+        Ok((p, d)) if d > first_distance => Ok((p, d)),
         second => {
             if first.is_ok() || second.is_err() {
                 white.mesh = first_white;
             }
-            first.or(second).map(|(p, _)| (p.0, n_skeleton, iters, p.1))
+            first.or(second)
         }
     }
 }
@@ -341,8 +395,9 @@ fn finish_pial(
     field: &Field,
     params: &PialParams,
     min_thickness: f64,
+    untangle: bool,
 ) -> Result<FinishedPial, String> {
-    let mut pial = start_pial(&mut white.mesh, field, params)?;
+    let mut pial = start_pial(&mut white.mesh, field, params, untangle)?;
     // Triangles de la piale : arêtes d'au moins un quart de l'arête moyenne de la blanche, angles d'au
     // moins 10°, pour que la tétraédrisation (gyroxide) ne crée pas d'éléments dégénérés.
     let edge = surfoxide_core::adjacency::mean_edge_length(&white.mesh);
@@ -366,8 +421,14 @@ fn finish_pial(
 }
 
 /// Départ de la piale : si quelques sommets le bloquent, on détend localement la surface blanche (sans
-/// intersection) et on réessaie, puis des reprises de plus en plus fortes.
-fn start_pial(white: &mut TriMesh, field: &Field, params: &PialParams) -> Result<surfoxide_pial::Pial, String> {
+/// intersection) et on réessaie, puis des reprises de plus en plus fortes ; avec `untangle`, les arêtes
+/// courtes laissées par ces reprises sont démêlées.
+fn start_pial(
+    white: &mut TriMesh,
+    field: &Field,
+    params: &PialParams,
+    untangle: bool,
+) -> Result<surfoxide_pial::Pial, String> {
     let mut attempt = 0;
     loop {
         match pial_from_white(white, field, params) {
@@ -382,7 +443,7 @@ fn start_pial(white: &mut TriMesh, field: &Field, params: &PialParams) -> Result
                     // Amas de micro-triangles : la fusion renumérote les sommets, les indices bloquants
                     // ne valent plus ; on réessaie tel quel.
                     2 => {
-                        clean_short_edges(white, 0.05);
+                        clean_short_edges(white, 0.05, false);
                         unfold(white);
                     }
                     // Lissage libre suivi d'une réparation (crête en lame de couteau).
@@ -392,8 +453,8 @@ fn start_pial(white: &mut TriMesh, field: &Field, params: &PialParams) -> Result
                 }
                 // Les détentes contractent parfois l'amas en micro-arêtes, que la piale hériterait.
                 let short = 0.25 * surfoxide_core::adjacency::mean_edge_length(white);
-                if min_edge_length(white) < short {
-                    clean_short_edges(white, short);
+                if untangle && min_edge_length(white) < short {
+                    clean_short_edges(white, short, true);
                 }
                 attempt += 1;
             }
