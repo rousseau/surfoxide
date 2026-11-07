@@ -94,7 +94,15 @@ démêlage si la piale finit sous l'épaisseur minimale (sub-rag2a ses-01 R). Va
 respecté (sub-5ksd1 ses-01 L BOUNTI-19 0,014 → 0,0003 mm, sub-jkq1g ses-02 R 0,129 → 0,044 mm). Restent entre
 0,05 et 0,1 mm des arêtes de la blanche que le démêlage ne retire pas (kvbr9, z067x) et des plis si aigus que
 l'arête diminue de moitié même au plancher du décalage (yp2at, srxv8) ; piste : fusion d'arête simultanée sur la
-blanche et la piale. Côté gyroxide (`origin/main`), sortie GIfTI en mm et pas de temps tiré de la
+blanche et la piale. Essai dans gyroxide (novembre 2026, `scripts/gyroxide_check.py`, PGX, gyroxide
+`main` fusionné avec la PR #9, 13 hémisphères de la validation 13, 20 000 pas en croissance uniforme et suivant
+`cortex`) : le nombre de pas jusqu'à t = 1 suit l'inverse de l'arête min de la piale (37 SA multi-BOUNTI : 0,79 M
+pas pour le témoin à 0,13 mm, ~25 h ; 1,31 M pour yp2at à 0,070 mm ; 1,87 M pour kvbr9 à 0,050 mm). Le faible
+dégagement (5ksd1, b7x2q : 0,0003 mm, 1 contact au départ) ne gêne pas sur ces 20 000 pas. Les deux mêmes
+modes de croissance se comportent pareil. Trois runs divergent (NaN : s8nzq dans les deux modes, yp2at en
+croissance uniforme) : le NaN naît chaque fois dans le pire tétraèdre de TetGen, plat (qualité < 1e-4) et à
+quatre sommets sur la piale, que l'option `Y` (triangles de la piale conservés) empêche de retirer ; la piale n'y est
+pas serrée. Côté gyroxide (`origin/main`), sortie GIfTI en mm et pas de temps tiré de la
 plus courte arête faits ; croissance suivant le champ `cortex` du `.vtu` (`--growth-field cortex`, 0 sur la
 face médiale) : rousseau/gyroxide#9, non essayée sur une session réelle. Retour du collègue (DPF*) : améliorer l'extraction de la blanche (ondulations millimétriques
 avant 28 SA) ; α_ref à recalibrer pour les fœtus. Essai non retenu (octobre 2026, branche locale
