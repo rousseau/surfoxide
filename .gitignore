@@ -12,3 +12,7 @@
 # Données locales
 /data/
 __pycache__/
+
+# Fichiers de travail privés, dans le dépôt oxide (claude/surfoxide.md, claude/surfoxide-roadmap.md), liés par setup/install.sh
+CLAUDE.md
+docs/ROADMAP.md
