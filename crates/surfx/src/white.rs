@@ -401,19 +401,56 @@ fn finish_pial(
     // Triangles de la piale : arêtes d'au moins un quart de l'arête moyenne de la blanche, angles d'au
     // moins 10°, pour que la tétraédrisation (gyroxide) ne crée pas d'éléments dégénérés.
     let edge = surfoxide_core::adjacency::mean_edge_length(&white.mesh);
-    let reg = surfoxide_pial::regularize(
-        &mut pial.mesh,
-        &white.mesh,
-        &surfoxide_pial::RegularizeParams {
-            min_edge: 0.25 * edge,
-            min_angle: 10.0,
-            min_distance: params.min_distance,
-            min_clearance: params.min_clearance,
-            rings: 2,
-            rounds: 50,
-        },
-    );
+    let reg_params = surfoxide_pial::RegularizeParams {
+        min_edge: 0.25 * edge,
+        min_angle: 10.0,
+        min_distance: params.min_distance,
+        min_clearance: params.min_clearance,
+        rings: 2,
+        rounds: 50,
+    };
+    let mut reg = surfoxide_pial::regularize(&mut pial.mesh, &white.mesh, &reg_params);
     surfoxide_pial::debug_edges("régularisation", &pial.mesh, &white.mesh, 0.25 * edge);
+    // Arêtes que la régularisation n'a pas pu allonger (sommets retenus par la distance à la blanche ou le
+    // dégagement) : la plus courte fixe le pas de temps de gyroxide. Fusion couplée sur les deux surfaces, puis
+    // nouvelle régularisation ; une piale sans telle arête n'est pas touchée.
+    let short = 0.2 * edge;
+    if min_edge_length(&pial.mesh) < short {
+        let paired = surfoxide_remesh::paired::collapse_paired_short_edges(
+            &white.mesh,
+            &pial.mesh,
+            &surfoxide_remesh::paired::PairedParams {
+                min_len: short,
+                min_cos: 0.05,
+                min_distance: params.min_distance,
+                min_clearance: params.min_clearance,
+                passes: 5,
+            },
+        );
+        if let Ok(r) = paired {
+            if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
+                eprintln!(
+                    "  fusion couplée : {} opérations, arête min de la piale {:.4} → {:.4} mm, {} encore courtes",
+                    r.operations,
+                    min_edge_length(&pial.mesh),
+                    min_edge_length(&r.pial),
+                    r.remaining
+                );
+            }
+            if r.operations > 0 {
+                white.mesh = r.white;
+                pial.merge_vertices(r.pial, &r.sources);
+                let again = surfoxide_pial::regularize(&mut pial.mesh, &white.mesh, &reg_params);
+                reg = surfoxide_pial::RegularizeReport {
+                    short_edges: (reg.short_edges.0, again.short_edges.1),
+                    sharp_triangles: (reg.sharp_triangles.0, again.sharp_triangles.1),
+                    min_edge: (reg.min_edge.0, again.min_edge.1),
+                    min_angle: (reg.min_angle.0, again.min_angle.1),
+                };
+                surfoxide_pial::debug_edges("fusion couplée", &pial.mesh, &white.mesh, 0.25 * edge);
+            }
+        }
+    }
     // Distance minimale du contrat : les sommets blancs restés trop près de la piale reculent un peu.
     surfoxide_pial::enforce_min_distance(&mut white.mesh, &pial.mesh, 1.5 * min_thickness, 5);
     let distance = surfoxide_check::check_pair(&white.mesh, &pial.mesh, min_thickness).min_distance;

@@ -12,6 +12,7 @@ use surfoxide_core::vec3::{self, Vec3};
 use surfoxide_core::TriMesh;
 
 pub mod halfedge;
+pub mod paired;
 
 use halfedge::{HalfEdgeMesh, NotClosedManifold};
 

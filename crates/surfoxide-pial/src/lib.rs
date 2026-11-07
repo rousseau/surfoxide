@@ -338,6 +338,27 @@ pub struct Pial {
     pub missing: VertexField,
 }
 
+impl Pial {
+    /// Remplace la piale par `mesh`, issue d'une fusion de sommets : `sources[i]` liste les sommets d'origine
+    /// réunis dans le sommet `i`. L'épaisseur et la longueur non parcourue sont moyennées sur ces sommets ; le
+    /// nombre de sommets retenus devient celui des sommets dont la longueur non parcourue reste positive.
+    pub fn merge_vertices(&mut self, mesh: TriMesh, sources: &[Vec<u32>]) {
+        assert_eq!(mesh.n_vertices(), sources.len());
+        let mean = |values: &[f64]| -> Vec<f64> {
+            sources
+                .iter()
+                .map(|s| s.iter().map(|&v| values[v as usize]).sum::<f64>() / s.len() as f64)
+                .collect()
+        };
+        self.thickness.values = mean(&self.thickness.values);
+        self.missing.values = mean(&self.missing.values);
+        let behind: Vec<f64> = self.missing.values.iter().copied().filter(|&m| m > 1e-6).collect();
+        self.held = behind.len();
+        self.mean_missing = behind.iter().sum::<f64>() / behind.len().max(1) as f64;
+        self.mesh = mesh;
+    }
+}
+
 /// Erreur de construction de la piale.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PialError {
