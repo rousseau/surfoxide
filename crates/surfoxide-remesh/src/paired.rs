@@ -61,17 +61,20 @@ enum Op {
     Collapse(u32, u32, At),
 }
 
-/// Les deux surfaces, de même structure, et les sommets d'origine de chaque sommet.
+/// Les deux surfaces, de même structure.
 #[derive(Clone)]
 struct Pair {
     w: HalfEdgeMesh,
     p: HalfEdgeMesh,
-    members: Vec<Vec<u32>>,
 }
 
+/// Essai retenu : les surfaces, la plus courte arête locale de la piale et les fusions (disparu, receveur).
+type Trial = (Pair, f64, Vec<(u32, u32)>);
+
 impl Pair {
-    /// Applique `op` aux deux surfaces, sur une copie ; `None` si elle n'est pas permise.
-    fn apply(&self, op: Op) -> Option<Pair> {
+    /// Applique `op` aux deux surfaces, sur une copie ; `None` si elle n'est pas permise. Rend aussi, pour une
+    /// fusion, le sommet disparu et celui qui le reçoit.
+    fn apply(&self, op: Op) -> Option<(Pair, Option<(u32, u32)>)> {
         let (Op::Flip(a, b) | Op::Collapse(a, b, _)) = op;
         let h = half_edge(&self.w, a, b)?;
         let mut t = self.clone();
@@ -99,11 +102,10 @@ impl Pair {
                 t.w.collapse(h, pw);
                 t.p.collapse(h, pp);
                 // a disparaît dans b.
-                let moved = std::mem::take(&mut t.members[a as usize]);
-                t.members[b as usize].extend(moved);
+                return Some((t, Some((a, b))));
             }
         }
-        Some(t)
+        Some((t, None))
     }
 }
 
@@ -126,6 +128,8 @@ struct Local {
     white_edge: f64,
     cone: f64,
     conflicts: usize,
+    /// Intersections par nature : blanche–blanche, piale–piale, blanche–piale (diagnostic).
+    kinds: [usize; 3],
     gap: f64,
     clearance: f64,
 }
@@ -162,6 +166,15 @@ impl Neighborhood {
         out
     }
 
+    /// Mesures bon marché (arêtes et cônes du voisinage), avant les intersections et les distances.
+    fn quick(&self, pair: &Pair, ring: &[u32]) -> (f64, f64, f64) {
+        (
+            min_edge_around(&pair.p, ring),
+            min_edge_around(&pair.w, ring),
+            min_cone(&pair.w, ring).min(min_cone(&pair.p, ring)),
+        )
+    }
+
     fn measure(&self, pair: &Pair, ring: &[u32]) -> Local {
         let live: Vec<u32> = ring
             .iter()
@@ -192,24 +205,38 @@ impl Neighborhood {
                 .chain(tp.iter().map(|f| (fw.len() + fp.binary_search(f).unwrap()) as u32))
                 .collect()
         };
-        let conflicts = if faces.is_empty() {
-            0
+        let nw = fw.len() as u32;
+        let pairs = if faces.is_empty() {
+            Vec::new()
         } else {
             let mesh = TriMesh::new(pos, faces).expect("faces vivantes");
-            self_intersections_among(&mesh, &touched).len()
+            self_intersections_among(&mesh, &touched)
         };
+        let conflicts = pairs.len();
+        let mut kinds = [0; 3];
+        for (f, g) in pairs {
+            kinds[match (f < nw, g < nw) {
+                (true, true) => 0,
+                (false, false) => 1,
+                _ => 2,
+            }] += 1;
+        }
         let tri = |m: &HalfEdgeMesh, f: usize| m.faces[f].map(|v| m.pos[v as usize]);
-        // Distance blanche–piale : sommets blancs proches contre faces de la piale proches, et l'inverse.
+        // Distance blanche–piale, là seulement où une opération peut la changer : sommets du voisinage (les seuls
+        // déplacés) contre les faces proches de l'autre surface, et sommets proches contre les faces du voisinage.
+        let (lw, lp) = (faces_of(&pair.w, &live), faces_of(&pair.p, &live));
         let mut gap2 = f64::INFINITY;
-        for &v in &near {
-            let (pw, pp) = (pair.w.pos[v as usize], pair.p.pos[v as usize]);
-            for &f in &fp {
-                let [a, b, c] = tri(&pair.p, f);
-                gap2 = gap2.min(distance2_triangle(pw, a, b, c));
-            }
-            for &f in &fw {
-                let [a, b, c] = tri(&pair.w, f);
-                gap2 = gap2.min(distance2_triangle(pp, a, b, c));
+        for (vs, fws, fps) in [(&live, &fw, &fp), (&near, &lw, &lp)] {
+            for &v in vs.iter() {
+                let (pw, pp) = (pair.w.pos[v as usize], pair.p.pos[v as usize]);
+                for &f in fps.iter() {
+                    let [a, b, c] = tri(&pair.p, f);
+                    gap2 = gap2.min(distance2_triangle(pw, a, b, c));
+                }
+                for &f in fws.iter() {
+                    let [a, b, c] = tri(&pair.w, f);
+                    gap2 = gap2.min(distance2_triangle(pp, a, b, c));
+                }
             }
         }
         // Dégagement des sommets de la piale du voisinage : distance aux faces proches non incidentes.
@@ -229,6 +256,7 @@ impl Neighborhood {
             white_edge: min_edge_around(&pair.w, &live),
             cone: min_cone(&pair.w, &live).min(min_cone(&pair.p, &live)),
             conflicts,
+            kinds,
             gap: gap2.sqrt(),
             clearance: clear2.sqrt(),
         }
@@ -276,8 +304,8 @@ pub fn collapse_paired_short_edges(
     let mut pair = Pair {
         w: HalfEdgeMesh::from_mesh(white)?,
         p: HalfEdgeMesh::from_mesh(pial)?,
-        members: (0..n as u32).map(|v| vec![v]).collect(),
     };
+    let mut members: Vec<Vec<u32>> = (0..n as u32).map(|v| vec![v]).collect();
     if short(&pair.p).is_empty() {
         return Ok(unchanged());
     }
@@ -375,49 +403,93 @@ pub fn collapse_paired_short_edges(
                     }
                 }
             }
-            let mut best: Option<(Pair, f64)> = None;
-            // Diagnostic (SURFOXIDE_DEBUG) : refus par critère des essais qui allongent l'arête.
+            let mut best: Option<Trial> = None;
+            // Diagnostic (SURFOXIDE_DEBUG) : pour chaque essai qui allonge l'arête, premier critère refusé.
             let mut refused = [0usize; 6];
+            let mut kinds = [0usize; 3];
             let n_ops = ops.len();
             for seq in ops {
-                let mut t = Some(pair.clone());
+                let mut t = Some((pair.clone(), Vec::new()));
                 for (k, &op) in seq.iter().enumerate() {
-                    let cur = t.take().unwrap();
+                    let (cur, mut merged) = t.take().unwrap();
                     // Si la fusion préalable a déjà supprimé a ou b, l'arête courte a disparu avec elle.
-                    let gone = k > 0 && half_edge(&cur.p, a, b).is_none();
-                    t = if gone { Some(cur) } else { cur.apply(op) };
+                    if k > 0 && half_edge(&cur.p, a, b).is_none() {
+                        t = Some((cur, merged));
+                        continue;
+                    }
+                    t = cur.apply(op).map(|(next, m)| {
+                        merged.extend(m);
+                        (next, merged)
+                    });
                     if t.is_none() {
                         break;
                     }
                 }
-                let Some(t) = t else { continue };
-                let after = hood.measure(&t, &ring);
-                if after.pial_edge <= before.pial_edge + 1e-12 {
-                    refused[0] += 1;
-                    continue;
+                let Some((mut t, merged)) = t else { continue };
+                let live: Vec<u32> = ring.iter().copied().filter(|&v| t.w.vertex_alive[v as usize]).collect();
+                // Variantes : le sommet fusionné de la piale replacé sur la normale de la blanche, à quelques
+                // fractions de la distance minimale (là où la piale touche presque la blanche, la fusion au même
+                // emplacement relatif fait se croiser les deux surfaces).
+                let mut places: Vec<Option<(u32, Vec3)>> = vec![None];
+                if let Some(s) = [a, b].into_iter().find(|&v| t.w.vertex_alive[v as usize]) {
+                    let normal =
+                        t.w.outgoing(s)
+                            .into_iter()
+                            .map(|h| t.w.face_normal((h / 3) as usize))
+                            .fold([0.0; 3], vec3::add);
+                    if vec3::norm(normal) > 0.0 {
+                        let normal = vec3::normalize(normal);
+                        for k in [0.5, 1.0, 2.0] {
+                            let q = vec3::add(t.w.pos[s as usize], vec3::scale(normal, k * params.min_distance));
+                            places.push(Some((s, q)));
+                        }
+                    }
                 }
-                if best.as_ref().is_some_and(|(_, e)| after.pial_edge <= *e) {
-                    continue;
-                }
-                let tests = [
-                    after.white_edge >= before.white_edge.min(params.min_len),
-                    after.cone >= before.cone.min(params.min_cos),
-                    after.conflicts <= before.conflicts,
-                    after.gap >= before.gap.min(params.min_distance),
-                    after.clearance >= before.clearance.min(params.min_clearance),
-                ];
-                for (k, &t) in tests.iter().enumerate() {
-                    refused[k + 1] += usize::from(!t);
-                }
-                if tests.iter().all(|&t| t) {
-                    let e = after.pial_edge;
-                    best = Some((t, e));
+                let kept = places.iter().flatten().next().map(|&(s, _)| (s, t.p.pos[s as usize]));
+                for place in places {
+                    match (place, kept) {
+                        (Some((s, q)), _) => t.p.pos[s as usize] = q,
+                        (None, Some((s, q))) => t.p.pos[s as usize] = q,
+                        (None, None) => {}
+                    }
+                    let (pial_edge, white_edge, cone) = hood.quick(&t, &live);
+                    if pial_edge <= before.pial_edge + 1e-12 {
+                        refused[0] += 1;
+                        continue;
+                    }
+                    if best.as_ref().is_some_and(|(_, e, _)| pial_edge <= *e) {
+                        continue;
+                    }
+                    if white_edge < before.white_edge.min(params.min_len) {
+                        refused[1] += 1;
+                        continue;
+                    }
+                    if cone < before.cone.min(params.min_cos) {
+                        refused[2] += 1;
+                        continue;
+                    }
+                    let after = hood.measure(&t, &ring);
+                    let tests = [
+                        after.conflicts <= before.conflicts,
+                        after.gap >= before.gap.min(params.min_distance),
+                        after.clearance >= before.clearance.min(params.min_clearance),
+                    ];
+                    if let Some(k) = tests.iter().position(|&ok| !ok) {
+                        refused[k + 3] += 1;
+                        if k == 0 {
+                            for (n, (x, y)) in kinds.iter_mut().zip(after.kinds.iter().zip(before.kinds)) {
+                                *n += usize::from(*x > y);
+                            }
+                        }
+                        continue;
+                    }
+                    best = Some((t.clone(), pial_edge, merged.clone()));
                 }
             }
             if best.is_none() && std::env::var_os("SURFOXIDE_DEBUG").is_some() {
                 eprintln!(
                     "  fusion couplée : arête {a}–{b} ({:.4} mm) refusée ; essais {}, sans gain {}, refus blanche {} \
-                     cône {} intersections {} distance {} dégagement {} (avant : blanche {:.4}, cône {:.3}, \
+                     cône {} intersections {} (blanche {}, piale {}, croisées {}) distance {} dégagement {} (avant : blanche {:.4}, cône {:.3}, \
                      intersections {}, distance {:.4}, dégagement {:.4})",
                     pair.p.edge_length(h),
                     n_ops,
@@ -425,6 +497,9 @@ pub fn collapse_paired_short_edges(
                     refused[1],
                     refused[2],
                     refused[3],
+                    kinds[0],
+                    kinds[1],
+                    kinds[2],
                     refused[4],
                     refused[5],
                     before.white_edge,
@@ -434,8 +509,12 @@ pub fn collapse_paired_short_edges(
                     before.clearance
                 );
             }
-            if let Some((t, _)) = best {
+            if let Some((t, _, merged)) = best {
                 pair = t;
+                for (gone, into) in merged {
+                    let moved = std::mem::take(&mut members[gone as usize]);
+                    members[into as usize].extend(moved);
+                }
                 operations += 1;
                 changed = true;
             }
@@ -451,8 +530,7 @@ pub fn collapse_paired_short_edges(
         });
     }
     let remaining = short(&pair.p).len();
-    let sources = pair
-        .members
+    let sources = members
         .iter()
         .zip(&pair.w.vertex_alive)
         .filter(|(_, &alive)| alive)
