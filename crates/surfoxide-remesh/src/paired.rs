@@ -340,7 +340,45 @@ pub fn collapse_paired_short_edges(
                     }
                 }
             }
+            // Voisins communs de a et b en plus des deux sommets opposés (link condition violée, par exemple un
+            // sommet de valence 3 posé sur l'arête) : deux opérations préalables peuvent être nécessaires, sur
+            // les arêtes qui les relient à a ou b.
+            let apex = [pair.p.to(pair.p.next(h)), pair.p.to(pair.p.next(pair.p.twin(h)))];
+            let nb = pair.p.neighbors(b);
+            let extra: Vec<u32> = pair
+                .p
+                .neighbors(a)
+                .into_iter()
+                .filter(|c| nb.contains(c) && !apex.contains(c))
+                .collect();
+            if !extra.is_empty() {
+                let unlink: Vec<Op> = extra
+                    .iter()
+                    .flat_map(|&c| [(c, a), (c, b)])
+                    .map(|(x, y)| (x.min(y), x.max(y)))
+                    .flat_map(|(x, y)| {
+                        [
+                            Op::Flip(x, y),
+                            Op::Collapse(x, y, At::Middle),
+                            Op::Collapse(x, y, At::From),
+                            Op::Collapse(x, y, At::To),
+                        ]
+                    })
+                    .collect();
+                for (i, &first) in unlink.iter().enumerate() {
+                    for (j, &second) in unlink.iter().enumerate() {
+                        if i != j {
+                            for at in [At::Middle, At::From, At::To] {
+                                ops.push(vec![first, second, Op::Collapse(a, b, at)]);
+                            }
+                        }
+                    }
+                }
+            }
             let mut best: Option<(Pair, f64)> = None;
+            // Diagnostic (SURFOXIDE_DEBUG) : refus par critère des essais qui allongent l'arête.
+            let mut refused = [0usize; 6];
+            let n_ops = ops.len();
             for seq in ops {
                 let mut t = Some(pair.clone());
                 for (k, &op) in seq.iter().enumerate() {
@@ -354,20 +392,47 @@ pub fn collapse_paired_short_edges(
                 }
                 let Some(t) = t else { continue };
                 let after = hood.measure(&t, &ring);
-                if after.pial_edge <= before.pial_edge + 1e-12
-                    || best.as_ref().is_some_and(|(_, e)| after.pial_edge <= *e)
-                {
+                if after.pial_edge <= before.pial_edge + 1e-12 {
+                    refused[0] += 1;
                     continue;
                 }
-                let ok = after.white_edge >= before.white_edge.min(params.min_len)
-                    && after.cone >= before.cone.min(params.min_cos)
-                    && after.conflicts <= before.conflicts
-                    && after.gap >= before.gap.min(params.min_distance)
-                    && after.clearance >= before.clearance.min(params.min_clearance);
-                if ok {
+                if best.as_ref().is_some_and(|(_, e)| after.pial_edge <= *e) {
+                    continue;
+                }
+                let tests = [
+                    after.white_edge >= before.white_edge.min(params.min_len),
+                    after.cone >= before.cone.min(params.min_cos),
+                    after.conflicts <= before.conflicts,
+                    after.gap >= before.gap.min(params.min_distance),
+                    after.clearance >= before.clearance.min(params.min_clearance),
+                ];
+                for (k, &t) in tests.iter().enumerate() {
+                    refused[k + 1] += usize::from(!t);
+                }
+                if tests.iter().all(|&t| t) {
                     let e = after.pial_edge;
                     best = Some((t, e));
                 }
+            }
+            if best.is_none() && std::env::var_os("SURFOXIDE_DEBUG").is_some() {
+                eprintln!(
+                    "  fusion couplée : arête {a}–{b} ({:.4} mm) refusée ; essais {}, sans gain {}, refus blanche {} \
+                     cône {} intersections {} distance {} dégagement {} (avant : blanche {:.4}, cône {:.3}, \
+                     intersections {}, distance {:.4}, dégagement {:.4})",
+                    pair.p.edge_length(h),
+                    n_ops,
+                    refused[0],
+                    refused[1],
+                    refused[2],
+                    refused[3],
+                    refused[4],
+                    refused[5],
+                    before.white_edge,
+                    before.cone,
+                    before.conflicts,
+                    before.gap,
+                    before.clearance
+                );
             }
             if let Some((t, _)) = best {
                 pair = t;
