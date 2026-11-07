@@ -102,7 +102,17 @@ dégagement (5ksd1, b7x2q : 0,0003 mm, 1 contact au départ) ne gêne pas sur ce
 modes de croissance se comportent pareil. Trois runs divergent (NaN : s8nzq dans les deux modes, yp2at en
 croissance uniforme) : le NaN naît chaque fois dans le pire tétraèdre de TetGen, plat (qualité < 1e-4) et à
 quatre sommets sur la piale, que l'option `Y` (triangles de la piale conservés) empêche de retirer ; la piale n'y est
-pas serrée. Côté gyroxide (`origin/main`), sortie GIfTI en mm et pas de temps tiré de la
+pas serrée. Fusion couplée des arêtes courtes (`surfoxide-remesh::paired`, appelée dans `finish_pial` sous
+0,2 × l'arête moyenne) : même opération (fusion, bascule ou fusion voisine préalable, deux opérations si la link
+condition l'exige) sur la piale et la blanche, sommet fusionné de la piale éventuellement replacé sur la normale de
+la blanche ; retenue si elle allonge l'arête locale sans dégrader blanche, cônes, intersections, distance ni
+dégagement. Validation 15 (contre la 13) : contrat inchangé, aucun hémisphère dégradé, HD95 et épaisseur
+médians inchangés ; piales < 0,1 mm : 1 → 0 et 14 → 5 (q0 multi-BOUNTI 0,013 → 0,050, q1 0,076 → 0,090 mm),
+temps total inchangé (la validation 14, critères coûteux évalués à chaque essai, multipliait jusqu'à ×9 le
+temps des hémisphères à arêtes courtes). Restent kvbr9 (0,050), z067x (0,076), ru8l4 ses-03 (0,078, hors
+contrat), ru8l4 ses-02 (0,089), yp2at (0,090) : plis locaux où la piale touche presque la blanche (0,0002 à
+0,003 mm) ; toute fusion y croise les deux surfaces (diagnostic sous `SURFOXIDE_DEBUG`). Piste : déplisser la
+blanche en amont. Côté gyroxide (`origin/main`), sortie GIfTI en mm et pas de temps tiré de la
 plus courte arête faits ; croissance suivant le champ `cortex` du `.vtu` (`--growth-field cortex`, 0 sur la
 face médiale) : rousseau/gyroxide#9, non essayée sur une session réelle. Retour du collègue (DPF*) : améliorer l'extraction de la blanche (ondulations millimétriques
 avant 28 SA) ; α_ref à recalibrer pour les fœtus. Essai non retenu (octobre 2026, branche locale
