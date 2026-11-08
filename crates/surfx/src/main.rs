@@ -16,6 +16,7 @@
 //! - `dataset` : exemple d'entraînement d'un hémisphère pour les réseaux de déformation (P1).
 //! - `depth` : courbure moyenne et profondeur sulcale DPF* (invariante d'échelle) d'une surface.
 //! - `compare` : couple blanche/piale estimé contre sa vérité (distances, épaisseur, courbure, D*, aire, IG).
+//! - `profile` : position du bord T2w le long des normales d'une surface (décalage signé, netteté).
 //! - `phantom` : fantôme à vérité connue (étiquettes, fractions de volume partiel, T2w, champs vrais) d'un couple
 //!   blanche/piale (plan qualité, `surfoxide-bench`).
 
@@ -23,6 +24,7 @@ mod compare;
 mod dataset;
 mod eval;
 mod phantom;
+mod profile;
 mod white;
 
 use std::path::PathBuf;
@@ -227,6 +229,8 @@ enum Command {
     Phantom(phantom::PhantomArgs),
     /// Couple blanche/piale estimé contre sa vérité : distances, épaisseur, courbure, D*, aire, IG, taches et bassins
     Compare(compare::CompareArgs),
+    /// Position du bord T2w le long des normales d'une surface : décalage signé et netteté du bord
+    Profile(profile::ProfileArgs),
     /// Courbure moyenne et profondeur sulcale DPF* d'une surface fermée
     Depth {
         /// Surface (GIfTI, VTP, PLY, STL, FreeSurfer)
@@ -537,6 +541,7 @@ fn main() -> ExitCode {
         } => dataset::run(&seg, &labels, hemi, &white, &pial, &out),
         Command::Phantom(args) => phantom::run(&args),
         Command::Compare(args) => compare::run(&args),
+        Command::Profile(args) => profile::run(&args),
         Command::Depth {
             surface,
             alpha,

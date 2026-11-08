@@ -11,6 +11,7 @@ pub mod analytic;
 pub mod compare;
 pub mod image;
 pub mod noise;
+pub mod profile;
 pub mod rng;
 pub mod truth;
 pub mod voxel;
