@@ -12,3 +12,7 @@
 # Données locales
 /data/
 __pycache__/
+
+# Fichiers de travail privés, rangés dans le dépôt privé oxide (liens créés par setup/install.sh)
+CLAUDE.md
+docs/ROADMAP.md
