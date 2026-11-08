@@ -1,0 +1,10 @@
+[package]
+name = "surfoxide-bench"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+surfoxide-core = { path = "../surfoxide-core" }
+surfoxide-check = { path = "../surfoxide-check" }
+surfoxide-metrics = { path = "../surfoxide-metrics" }
+rayon = { workspace = true }
