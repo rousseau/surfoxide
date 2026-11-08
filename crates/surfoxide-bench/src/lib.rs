@@ -7,6 +7,7 @@
 //!
 //! Sans Burn ni format de fichier : la lecture et l'écriture sont faites par `surfx phantom`.
 
+pub mod analytic;
 pub mod image;
 pub mod noise;
 pub mod rng;
