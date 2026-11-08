@@ -15,9 +15,11 @@
 //! - `train` : entraînement du réseau de déformation blanche → piale (P1).
 //! - `dataset` : exemple d'entraînement d'un hémisphère pour les réseaux de déformation (P1).
 //! - `depth` : courbure moyenne et profondeur sulcale DPF* (invariante d'échelle) d'une surface.
+//! - `compare` : couple blanche/piale estimé contre sa vérité (distances, épaisseur, courbure, D*, aire, IG).
 //! - `phantom` : fantôme à vérité connue (étiquettes, fractions de volume partiel, T2w, champs vrais) d'un couple
 //!   blanche/piale (plan qualité, `surfoxide-bench`).
 
+mod compare;
 mod dataset;
 mod eval;
 mod phantom;
@@ -223,6 +225,8 @@ enum Command {
     /// Fantôme à vérité connue d'un couple blanche/piale : étiquettes BOUNTI-19, fractions de volume partiel, T2w
     /// synthétique et champs vrais (épaisseur, courbure, D*)
     Phantom(phantom::PhantomArgs),
+    /// Couple blanche/piale estimé contre sa vérité : distances, épaisseur, courbure, D*, aire, IG, taches et bassins
+    Compare(compare::CompareArgs),
     /// Courbure moyenne et profondeur sulcale DPF* d'une surface fermée
     Depth {
         /// Surface (GIfTI, VTP, PLY, STL, FreeSurfer)
@@ -532,6 +536,7 @@ fn main() -> ExitCode {
             out,
         } => dataset::run(&seg, &labels, hemi, &white, &pial, &out),
         Command::Phantom(args) => phantom::run(&args),
+        Command::Compare(args) => compare::run(&args),
         Command::Depth {
             surface,
             alpha,
