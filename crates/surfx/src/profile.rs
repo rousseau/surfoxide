@@ -41,6 +41,13 @@ pub struct ProfileArgs {
     /// Écart-type du lissage de la dérivée (mm)
     #[arg(long, default_value_t = 0.1)]
     sigma: f64,
+    /// Courbe d'étalonnage (TSV de scripts/profile_calibration.py : week, kind, …, offset) : avec --ga, le rapport
+    /// donne aussi le décalage médian corrigé du biais des fantômes au même âge
+    #[arg(long, requires = "ga")]
+    calibration: Option<PathBuf>,
+    /// Âge gestationnel de la session (SA), pour --calibration
+    #[arg(long, requires = "calibration")]
+    ga: Option<f64>,
     /// Rapport JSON écrit dans ce fichier (sinon sur la sortie standard). Avec SURFOXIDE_DEBUG, champs par sommet
     /// (offset, amplitude, sharp) écrits dans <surface>_profile-<kind>.shape.gii
     #[arg(long)]
@@ -49,6 +56,51 @@ pub struct ProfileArgs {
 
 fn err(path: &Path, e: impl std::fmt::Display) -> String {
     format!("{} : {e}", path.display())
+}
+
+/// Biais de la courbe d'étalonnage `path` pour la surface `kind` à l'âge `ga` : interpolation linéaire entre
+/// semaines, bornée à la première et à la dernière.
+fn calibration_bias(path: &Path, kind: &str, ga: f64) -> Result<f64, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| err(path, e))?;
+    let mut lines = text.lines();
+    let header: Vec<&str> = lines
+        .next()
+        .ok_or_else(|| err(path, "fichier vide"))?
+        .split('\t')
+        .collect();
+    let col = |name: &str| {
+        header
+            .iter()
+            .position(|h| *h == name)
+            .ok_or_else(|| err(path, format!("colonne {name} absente")))
+    };
+    let (cw, ck, co) = (col("week")?, col("kind")?, col("offset")?);
+    let mut pts: Vec<(f64, f64)> = Vec::new();
+    for l in lines.filter(|l| !l.trim().is_empty()) {
+        let f: Vec<&str> = l.split('\t').collect();
+        if f.get(ck) == Some(&kind) {
+            let parse = |i: usize| -> Result<f64, String> {
+                f.get(i)
+                    .and_then(|v| v.parse().ok())
+                    .ok_or_else(|| err(path, format!("ligne illisible : {l}")))
+            };
+            pts.push((parse(cw)?, parse(co)?));
+        }
+    }
+    pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (first, last) = match (pts.first(), pts.last()) {
+        (Some(f), Some(l)) => (*f, *l),
+        _ => return Err(err(path, format!("aucune ligne pour {kind}"))),
+    };
+    if ga <= first.0 {
+        return Ok(first.1);
+    }
+    if ga >= last.0 {
+        return Ok(last.1);
+    }
+    let i = pts.iter().position(|p| p.0 >= ga).expect("borné");
+    let (a, b) = (pts[i - 1], pts[i]);
+    Ok(a.1 + (b.1 - a.1) * (ga - a.0) / (b.0 - a.0))
 }
 
 pub fn run(a: &ProfileArgs) -> Result<(), String> {
@@ -90,6 +142,13 @@ pub fn run(a: &ProfileArgs) -> Result<(), String> {
         "iqr_offset": s.iqr,
         "not_sharp_fraction": s.not_sharp,
     });
+    let mut report = report;
+    if let (Some(path), Some(ga)) = (&a.calibration, a.ga) {
+        let kind = report["kind"].as_str().unwrap_or("white").to_string();
+        let bias = calibration_bias(path, &kind, ga)?;
+        report["calibration"] = json!({ "file": path.display().to_string(), "ga": ga, "bias": bias });
+        report["calibrated_median_offset"] = json!(s.median - bias);
+    }
     let text = serde_json::to_string_pretty(&report).expect("JSON") + "\n";
     match &a.json {
         Some(path) => std::fs::write(path, text).map_err(|e| err(path, e))?,
