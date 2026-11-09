@@ -105,8 +105,10 @@ pub struct WhiteSurface {
     pub single_costs: Option<(usize, usize)>,
     /// Défauts de la correction `PerDefect`.
     pub defects: Vec<Defect>,
-    /// Voxels choisis que la croissance contrainte finale n'a pas pu poser.
+    /// Voxels choisis que l'étape finale n'a pas pu poser.
     pub unrecovered: usize,
+    /// L'étape finale est partie de la correction par bouchage (décroissance contrainte).
+    pub final_from_outer: bool,
     /// Sommets maintenus en place pendant le lissage (cumul sur les pas).
     pub held: usize,
     /// Réparation après remaillage.
@@ -190,6 +192,7 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
         single_costs: c.single_costs,
         defects: c.defects,
         unrecovered: c.unrecovered,
+        final_from_outer: c.final_from_outer,
         held,
         repair,
         remesh_dropped,
@@ -216,6 +219,7 @@ fn topology_report_json(w: &WhiteSurface) -> serde_json::Value {
         r["defects_cut"] = w.defects.iter().filter(|d| d.side == Side::Cut).count().into();
         r["defects_plug"] = w.defects.iter().filter(|d| d.side == Side::Plug).count().into();
         r["unrecovered_voxels"] = w.unrecovered.into();
+        r["final_from_outer"] = w.final_from_outer.into();
         r["defects"] = w
             .defects
             .iter()
