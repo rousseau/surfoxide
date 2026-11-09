@@ -16,6 +16,7 @@ surfoxide-repair = { path = "../surfoxide-repair" }
 surfoxide-pial = { path = "../surfoxide-pial" }
 surfoxide-metrics = { path = "../surfoxide-metrics" }
 surfoxide-learn = { path = "../surfoxide-learn" }
+surfoxide-bench = { path = "../surfoxide-bench" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rayon = { workspace = true }
