@@ -79,9 +79,12 @@ pub struct Correction {
     pub single_costs: Option<(usize, usize)>,
     /// Défauts (stratégie `PerDefect` seulement).
     pub defects: Vec<Defect>,
-    /// Voxels choisis par les défauts que la croissance contrainte finale n'a pas pu poser sans changer la
-    /// topologie (stratégie `PerDefect` seulement).
+    /// Voxels choisis par les défauts que l'étape finale n'a pas pu poser sans changer la topologie
+    /// (stratégie `PerDefect` seulement).
     pub unrecovered: usize,
+    /// L'étape finale est partie de la correction par bouchage (décroissance contrainte) et non de la
+    /// correction par coupe (croissance contrainte) ; stratégie `PerDefect` seulement.
+    pub final_from_outer: bool,
 }
 
 /// Erreur de correction.
@@ -283,10 +286,33 @@ fn grow_within(seed: &[bool], allowed: &[bool], p: &[f64], dims: [usize; 3]) -> 
     obj
 }
 
+/// Décroissance contrainte depuis `start` (objet homéomorphe à une boule) : ne retire que des points simples,
+/// pris parmi `removable`, par φ décroissant. La topologie de `start` est donc conservée. Symétrique de
+/// [`grow_within`].
+fn shrink_within(start: &[bool], removable: &[bool], p: &[f64], dims: [usize; 3]) -> Vec<bool> {
+    let mut obj = start.to_vec();
+    let mut heap = BinaryHeap::new();
+    for v in (0..obj.len()).filter(|&v| obj[v] && removable[v]) {
+        heap.push(Item(p[v], v));
+    }
+    while let Some(Item(_, v)) = heap.pop() {
+        if !obj[v] || !is_simple(neighborhood(&obj, dims, v)) {
+            continue; // reproposé si un voisin est retiré
+        }
+        obj[v] = false;
+        for n in neighbors26(dims, v) {
+            if obj[n] && removable[n] {
+                heap.push(Item(p[n], n));
+            }
+        }
+    }
+    obj
+}
+
 /// Correction défaut par défaut : `inner` (croissance de l'objet) est inclus dans l'objet initial, lui-même
 /// inclus dans `outer` (croissance du fond). Retourne l'objet corrigé, les défauts et le nombre de voxels
 /// choisis non posés.
-fn per_defect(inner: &[bool], outer: &[bool], p: &[f64], dims: [usize; 3]) -> (Vec<bool>, Vec<Defect>, usize) {
+fn per_defect(inner: &[bool], outer: &[bool], p: &[f64], dims: [usize; 3]) -> (Vec<bool>, Vec<Defect>, usize, bool) {
     let diff: Vec<bool> = inner.iter().zip(outer).map(|(&a, &b)| b && !a).collect();
     let (label, n) = components26(&diff, dims);
     let mut defects: Vec<Defect> = (0..n)
@@ -317,11 +343,29 @@ fn per_defect(inner: &[bool], outer: &[bool], p: &[f64], dims: [usize; 3]) -> (V
     let wanted: Vec<bool> = (0..inner.len())
         .map(|v| inner[v] || (diff[v] && defects[label[v]].side == Side::Plug))
         .collect();
-    // Dernière croissance contrainte : depuis l'intérieur (une boule), on ne pose que des points simples,
-    // donc le résultat est une boule quelle que soit l'interaction entre défauts voisins.
-    let object = grow_within(inner, &wanted, p, dims);
-    let unrecovered = wanted.iter().zip(&object).filter(|(&w, &o)| w && !o).count();
-    (object, defects, unrecovered)
+    // Dernière étape, qui garantit le genre 0 quelle que soit l'interaction entre défauts voisins :
+    // - croissance contrainte depuis l'intérieur (une boule) vers `wanted`, en ne posant que des points simples ;
+    // - si elle laisse des voxels voulus non posés (un bouchage qu'aucun ordre de points simples ne permet
+    //   depuis l'intérieur : la coupe reste, parfois bien plus coûteuse), décroissance contrainte symétrique
+    //   depuis l'extérieur (une boule) vers `wanted`, en ne retirant que des points simples.
+    // On garde le résultat qui modifie le moins de voxels de l'objet initial (la croissance en cas d'égalité).
+    let from_inner = grow_within(inner, &wanted, p, dims);
+    let missing = |obj: &[bool]| wanted.iter().zip(obj).filter(|(&w, &o)| w != o).count();
+    let (object, unrecovered, from_outer) = if missing(&from_inner) == 0 {
+        (from_inner, 0, false)
+    } else {
+        let removable: Vec<bool> = outer.iter().zip(&wanted).map(|(&b, &w)| b && !w).collect();
+        let from_outer = shrink_within(outer, &removable, p, dims);
+        let cost = |obj: &[bool]| obj.iter().zip(p).filter(|(&o, &x)| o != (x < 0.0)).count();
+        if cost(&from_outer) < cost(&from_inner) {
+            let n = missing(&from_outer);
+            (from_outer, n, true)
+        } else {
+            let n = missing(&from_inner);
+            (from_inner, n, false)
+        }
+    };
+    (object, defects, unrecovered, from_outer)
 }
 
 /// Corrige la topologie de l'objet `φ < 0` de façon qu'il soit homéomorphe à une boule.
@@ -345,6 +389,7 @@ pub fn correct_topology(phi: &Volume<f64>, strategy: Strategy, delta: f64) -> Re
     let mut single_costs = None;
     let mut defects = Vec::new();
     let mut unrecovered = 0;
+    let mut final_from_outer = false;
     let (object, used) = match strategy {
         Strategy::GrowObject => (grow_object(phi), Strategy::GrowObject),
         Strategy::GrowBackground => (grow_background(phi), Strategy::GrowBackground),
@@ -364,9 +409,10 @@ pub fn correct_topology(phi: &Volume<f64>, strategy: Strategy, delta: f64) -> Re
             let b = grow_background(phi);
             let (ca, cb) = (count(&a), count(&b));
             single_costs = Some((ca.0 + ca.1, cb.0 + cb.1));
-            let (o, d, u) = per_defect(&a, &b, p, dims);
+            let (o, d, u, f) = per_defect(&a, &b, p, dims);
             defects = d;
             unrecovered = u;
+            final_from_outer = f;
             (o, Strategy::PerDefect)
         }
     };
@@ -389,6 +435,7 @@ pub fn correct_topology(phi: &Volume<f64>, strategy: Strategy, delta: f64) -> Re
         single_costs,
         defects,
         unrecovered,
+        final_from_outer,
     })
 }
 
@@ -619,6 +666,95 @@ mod tests {
             testes += 1;
         }
         assert!(testes >= 20, "trop peu d'objets testés ({testes})");
+    }
+
+    /// Objet aléatoire (bruit lissé seuillé) de côté `n` avec marge de 3 voxels ; `None` s'il est vide.
+    fn objet_aleatoire(seed: &mut u64, n: usize, seuil: f64) -> Option<Volume<bool>> {
+        let mut bruit = vec![0.0f64; n * n * n];
+        for x in bruit.iter_mut() {
+            *x = (seed_next(seed) % 1000) as f64 / 1000.0;
+        }
+        for _ in 0..2 {
+            let copie = bruit.clone();
+            for k in 1..n - 1 {
+                for j in 1..n - 1 {
+                    for i in 1..n - 1 {
+                        let mut s = 0.0;
+                        for dk in 0..3 {
+                            for dj in 0..3 {
+                                for di in 0..3 {
+                                    s += copie[(i + di - 1) + n * ((j + dj - 1) + n * (k + dk - 1))];
+                                }
+                            }
+                        }
+                        bruit[i + n * (j + n * k)] = s / 27.0;
+                    }
+                }
+            }
+        }
+        let mut v = Volume::filled([n, n, n], false, IDENTITY);
+        for k in 3..n - 3 {
+            for j in 3..n - 3 {
+                for i in 3..n - 3 {
+                    v.set(i, j, k, bruit[i + n * (j + n * k)] > seuil);
+                }
+            }
+        }
+        v.data().iter().any(|&b| b).then_some(v)
+    }
+
+    /// Cas où la croissance depuis l'intérieur ne pose pas tous les bouchages voulus : la décroissance
+    /// symétrique depuis l'extérieur doit les poser (ou au moins ne jamais coûter plus), en gardant le genre 0.
+    #[test]
+    fn croissance_finale_symetrique_repare_les_bouchages_non_poses() {
+        let mut seed = 0x9E3779B97F4A7C15u64;
+        let (mut cas, mut ameliores) = (0, 0);
+        for essai in 0..300 {
+            let Some(v) = objet_aleatoire(&mut seed, 22, 0.40 + 0.0015 * (essai % 80) as f64) else {
+                continue;
+            };
+            let phi = signed_distance(&v);
+            let inner = grow_object(&phi);
+            let outer = grow_background(&phi);
+            // Résultat de la seule croissance depuis l'intérieur, pour comparaison.
+            let diff: Vec<bool> = inner.iter().zip(&outer).map(|(&a, &b)| b && !a).collect();
+            let (label, _) = components26(&diff, phi.dims());
+            let p = phi.data();
+            let mut cout = std::collections::HashMap::new();
+            for v in (0..diff.len()).filter(|&v| diff[v]) {
+                let e = cout.entry(label[v]).or_insert((0usize, 0usize));
+                if p[v] < 0.0 {
+                    e.0 += 1
+                } else {
+                    e.1 += 1
+                }
+            }
+            let wanted: Vec<bool> = (0..inner.len())
+                .map(|v| inner[v] || (diff[v] && cout[&label[v]].1 < cout[&label[v]].0))
+                .collect();
+            let seul = grow_within(&inner, &wanted, p, phi.dims());
+            if wanted != seul {
+                cas += 1;
+                let c = correct_topology(&phi, Strategy::PerDefect, 0.01).unwrap();
+                let cout_seul = seul.iter().zip(p).filter(|(&o, &x)| o != (x < 0.0)).count();
+                assert_eq!(digital_topology(&c.object), (1, 1, 1), "essai {essai}");
+                assert!(
+                    c.added + c.removed <= cout_seul,
+                    "essai {essai} : {} contre {cout_seul}",
+                    c.added + c.removed
+                );
+                if c.added + c.removed < cout_seul {
+                    ameliores += 1;
+                    assert!(c.final_from_outer, "essai {essai}");
+                }
+            }
+        }
+        println!("{cas} cas de bouchage non posé depuis l'intérieur, {ameliores} améliorés par la décroissance");
+        assert!(cas >= 1, "aucun cas de bouchage non posé trouvé : élargir la recherche");
+        assert!(
+            ameliores >= 1,
+            "la décroissance depuis l'extérieur n'améliore aucun cas"
+        );
     }
 
     fn seed_next(seed: &mut u64) -> u64 {
