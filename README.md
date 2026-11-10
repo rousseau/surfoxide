@@ -21,7 +21,7 @@ le contrat ci-dessous.
 |---|---|
 | `surfx device` | Vérifie qu'un backend Burn calcule sur la machine (CPU, CUDA ou wgpu) |
 | `surfx selftest` | Construit une icosphère et un tore et affiche leur bilan topologique |
-| `surfx run` | Surfaces blanche et piale de chaque hémisphère ; champs `thickness`, `curv`, `sulc` (DPF*, crêtes positives comme l'atlas dHCP, à l'inverse de FreeSurfer) et masque du cortex (`.shape.gii`) ; contrôle des maillages `desc-surfqc.tsv` ; rapport de contrat JSON. Avec `--bids`, dérivées `surfx-surfaces` lues par guioxide |
+| `surfx run` | Surfaces blanche et piale de chaque hémisphère ; champs `thickness`, `curv`, `sulc` (DPF*, crêtes positives comme l'atlas dHCP, à l'inverse de FreeSurfer) et masque du cortex (`.shape.gii`) ; contrôle des maillages `desc-surfqc.tsv` ; rapport de contrat JSON. Avec `--bids`, dérivées `surfx-surfaces` lues par guioxide. Correction topologique du masque blanc : `--topology per-defect` (défaut depuis le 10 novembre 2026 : un choix par défaut, anse à couper ou tunnel à boucher, le côté qui modifie le moins de voxels) ou `best` (l'ancienne correction globale) ; le bloc `topology` de `report.json` donne les voxels modifiés par chacune |
 | `surfx depth` | Courbure moyenne et profondeur sulcale DPF* d'une surface |
 | `surfx train` | Entraîne le réseau de déformation blanche → piale (P1) sur le jeu de `scripts/dataset.py` |
 | `surfx dataset` | Exemple d'entraînement d'un hémisphère (P1) : classes de tissu, distance signée, blanche et piale |

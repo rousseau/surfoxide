@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Bilan de la correction topologique par défaut (plan qualité, Q1.1) sur une validation lancée avec
-`--topology per-defect` (SURFX_RUN_ARGS) : voxels modifiés contre la meilleure correction globale, hémisphères
+`--topology per-defect` (depuis le 10 novembre 2026 le défaut de `surfx run` ; avant, `SURFX_RUN_ARGS="--topology per-defect"`) : voxels modifiés contre la meilleure correction globale, hémisphères
 gagnés ou perdus contre une validation de référence.
 
 Voxels (développement = folds 0 à 3 de subjects.csv, par table et tranche d'âge) : le `report.json` de chaque
@@ -54,7 +54,7 @@ def hemispheres(results):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--new", required=True, help="validation avec --topology per-defect")
+    ap.add_argument("--new", required=True, help="validation avec --topology per-defect (le défaut)")
     ap.add_argument("--ref", help="validation de référence (hémisphères gagnés et perdus)")
     ap.add_argument("--out", type=Path, help="TSV des mesures par table et tranche d'âge")
     args = ap.parse_args()

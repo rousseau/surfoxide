@@ -20,9 +20,10 @@ use surfoxide_topofix::{correct_topology, Defect, Side, Strategy};
 /// Stratégie de correction topologique.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum TopologyArg {
-    /// La meilleure des deux corrections globales (croissance de l'objet ou du fond) : défaut actuel
+    /// La meilleure des deux corrections globales (croissance de l'objet ou du fond) : l'ancien défaut
     Best,
-    /// Un choix par défaut (anse à couper ou tunnel à boucher), puis croissance contrainte de genre 0
+    /// Un choix par défaut (anse à couper ou tunnel à boucher), puis croissance contrainte de genre 0 : défaut
+    /// (décision du 10 novembre 2026 : moins de voxels modifiés, de 34 à 41 % à 32–38 SA, sans effet sur la conformité)
     PerDefect,
 }
 
@@ -39,7 +40,7 @@ impl TopologyArg {
 #[derive(Debug, Clone, clap::Args)]
 pub struct WhiteParams {
     /// Correction topologique du masque blanc
-    #[arg(long, value_enum, default_value = "best")]
+    #[arg(long, value_enum, default_value = "per-defect")]
     pub topology: TopologyArg,
     /// Écart-type (mm) du flou de la distance signée avant extraction
     #[arg(long, default_value_t = 0.25)]
@@ -848,5 +849,33 @@ fn surface_qc(
         area_mm2: Some(report.area),
         gi: (hull > 0.0).then(|| report.area / hull),
         mean_dist_to_seg_mm: Some(eval.surface_to_boundary.mean),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// Enveloppe pour analyser `WhiteParams` seul, comme le fait `surfx run`.
+    #[derive(Parser)]
+    struct Analyse {
+        #[command(flatten)]
+        blanche: WhiteParams,
+    }
+
+    #[test]
+    fn la_correction_par_defaut_est_per_defect() {
+        let a = Analyse::parse_from(["surfx"]);
+        assert_eq!(a.blanche.topology, TopologyArg::PerDefect);
+        assert_eq!(a.blanche.topology.strategy(), Strategy::PerDefect);
+    }
+
+    #[test]
+    fn best_reste_disponible_par_l_option() {
+        let a = Analyse::parse_from(["surfx", "--topology", "best"]);
+        assert_eq!(a.blanche.topology.strategy(), Strategy::Best);
+        let a = Analyse::parse_from(["surfx", "--topology", "per-defect"]);
+        assert_eq!(a.blanche.topology.strategy(), Strategy::PerDefect);
     }
 }
