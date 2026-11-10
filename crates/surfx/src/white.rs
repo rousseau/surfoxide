@@ -15,11 +15,33 @@ use surfoxide_core::{Hemisphere, TriMesh, Volume};
 use surfoxide_io::gifti::SurfaceMeta;
 use surfoxide_mask::LabelTable;
 use surfoxide_pial::{pial_from_white, solve_laplace, sulcal_skeleton, Field, PialParams};
-use surfoxide_topofix::{correct_topology, Strategy};
+use surfoxide_topofix::{correct_topology, Defect, Side, Strategy};
+
+/// Stratégie de correction topologique.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum TopologyArg {
+    /// La meilleure des deux corrections globales (croissance de l'objet ou du fond) : l'ancien défaut
+    Best,
+    /// Un choix par défaut (anse à couper ou tunnel à boucher), puis croissance contrainte de genre 0 : défaut
+    /// (décision du 10 novembre 2026 : moins de voxels modifiés, de 34 à 41 % à 32–38 SA, sans effet sur la conformité)
+    PerDefect,
+}
+
+impl TopologyArg {
+    fn strategy(self) -> Strategy {
+        match self {
+            TopologyArg::Best => Strategy::Best,
+            TopologyArg::PerDefect => Strategy::PerDefect,
+        }
+    }
+}
 
 /// Paramètres de la surface blanche.
 #[derive(Debug, Clone, clap::Args)]
 pub struct WhiteParams {
+    /// Correction topologique du masque blanc
+    #[arg(long, value_enum, default_value = "per-defect")]
+    pub topology: TopologyArg,
     /// Écart-type (mm) du flou de la distance signée avant extraction
     #[arg(long, default_value_t = 0.25)]
     pub sigma: f64,
@@ -80,6 +102,14 @@ pub struct WhiteSurface {
     pub added: usize,
     pub removed: usize,
     pub strategy: Strategy,
+    /// Voxels modifiés par chacune des deux corrections globales (croissance de l'objet, du fond).
+    pub single_costs: Option<(usize, usize)>,
+    /// Défauts de la correction `PerDefect`.
+    pub defects: Vec<Defect>,
+    /// Voxels choisis que l'étape finale n'a pas pu poser.
+    pub unrecovered: usize,
+    /// L'étape finale est partie de la correction par bouchage (décroissance contrainte).
+    pub final_from_outer: bool,
     /// Sommets maintenus en place pendant le lissage (cumul sur les pas).
     pub held: usize,
     /// Réparation après remaillage.
@@ -95,7 +125,7 @@ pub struct WhiteSurface {
 pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteSurface, String> {
     let phi = gaussian_blur(&signed_distance(mask), params.sigma);
     let min_spacing = mask.spacing().into_iter().fold(f64::INFINITY, f64::min);
-    let c = correct_topology(&phi, Strategy::Best, 0.05 * min_spacing).map_err(|e| e.to_string())?;
+    let c = correct_topology(&phi, params.topology.strategy(), 0.05 * min_spacing).map_err(|e| e.to_string())?;
     // Points à au moins 0,2 voxel des centres : une lame ou un sillon d'un voxel garde une épaisseur
     // d'au moins 0,2 voxel, où la piale peut passer.
     let mut mesh = surfoxide_extract::marching_cubes(&c.levelset, 0.2);
@@ -160,11 +190,52 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
         added: c.added,
         removed: c.removed,
         strategy: c.strategy,
+        single_costs: c.single_costs,
+        defects: c.defects,
+        unrecovered: c.unrecovered,
+        final_from_outer: c.final_from_outer,
         held,
         repair,
         remesh_dropped,
         tangled,
     })
+}
+
+/// Bilan de la correction topologique du masque pour `report.json` : stratégie, voxels modifiés, et pour la
+/// stratégie par défaut, nombre, taille et choix des défauts.
+fn topology_report_json(w: &WhiteSurface) -> serde_json::Value {
+    let mut r = serde_json::json!({
+        "strategy": format!("{:?}", w.strategy),
+        "voxels_added": w.added,
+        "voxels_removed": w.removed,
+        "voxels_modified": w.added + w.removed,
+    });
+    if let Some((object, background)) = w.single_costs {
+        r["voxels_grow_object"] = object.into();
+        r["voxels_grow_background"] = background.into();
+        r["voxels_best_global"] = object.min(background).into();
+    }
+    if w.strategy == Strategy::PerDefect {
+        r["defects_count"] = w.defects.len().into();
+        r["defects_cut"] = w.defects.iter().filter(|d| d.side == Side::Cut).count().into();
+        r["defects_plug"] = w.defects.iter().filter(|d| d.side == Side::Plug).count().into();
+        r["unrecovered_voxels"] = w.unrecovered.into();
+        r["final_from_outer"] = w.final_from_outer.into();
+        r["defects"] = w
+            .defects
+            .iter()
+            .map(|d| {
+                serde_json::json!({
+                    "size": d.size,
+                    "cost_cut": d.cost_cut,
+                    "cost_plug": d.cost_plug,
+                    "side": match d.side { Side::Cut => "cut", Side::Plug => "plug" },
+                })
+            })
+            .collect::<Vec<_>>()
+            .into();
+    }
+    r
 }
 
 /// Avec `SURFOXIDE_DEBUG`, affiche le bilan topologique après une étape.
@@ -600,7 +671,11 @@ pub fn run(
         let path = format!("{prefix}_white.surf.gii");
         surfoxide_io::gifti::write_surface(&path, &w.mesh, &meta(hemi, "GrayWhite", &labels, seg))
             .map_err(|e| format!("{path}: {e}"))?;
-        let mut report = serde_json::json!({ "white": white_report, "remesh_dropped": w.remesh_dropped });
+        let mut report = serde_json::json!({
+            "white": white_report,
+            "remesh_dropped": w.remesh_dropped,
+            "topology": topology_report_json(&w),
+        });
         let mut valid = white_report.valid && pial_error.is_none();
         if let Some(e) = &pial_error {
             report["pial_error"] = e.clone().into();
@@ -774,5 +849,33 @@ fn surface_qc(
         area_mm2: Some(report.area),
         gi: (hull > 0.0).then(|| report.area / hull),
         mean_dist_to_seg_mm: Some(eval.surface_to_boundary.mean),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// Enveloppe pour analyser `WhiteParams` seul, comme le fait `surfx run`.
+    #[derive(Parser)]
+    struct Analyse {
+        #[command(flatten)]
+        blanche: WhiteParams,
+    }
+
+    #[test]
+    fn la_correction_par_defaut_est_per_defect() {
+        let a = Analyse::parse_from(["surfx"]);
+        assert_eq!(a.blanche.topology, TopologyArg::PerDefect);
+        assert_eq!(a.blanche.topology.strategy(), Strategy::PerDefect);
+    }
+
+    #[test]
+    fn best_reste_disponible_par_l_option() {
+        let a = Analyse::parse_from(["surfx", "--topology", "best"]);
+        assert_eq!(a.blanche.topology.strategy(), Strategy::Best);
+        let a = Analyse::parse_from(["surfx", "--topology", "per-defect"]);
+        assert_eq!(a.blanche.topology.strategy(), Strategy::PerDefect);
     }
 }

@@ -43,6 +43,8 @@ REPO = Path(__file__).resolve().parent.parent
 DATA = Path(os.environ.get("SURFOXIDE_DATA", HOME / ".cache/surfoxide/data"))
 SUBJECTS = Path(os.environ.get("OXIDE_SUBJECTS", DATA / "subjects.csv"))
 SURFX = Path(os.environ.get("SURFX", REPO / "target/release/surfx"))
+# Options supplémentaires de `surfx run` (essais de réglages), comme dans validate.py.
+RUN_ARGS = os.environ.get("SURFX_RUN_ARGS", "").split()
 DEVELOPMENT = {"fold_0", "fold_1", "fold_2", "fold_3"}
 SHIFTS = {"0": (0.0, 0.0, 0.0), "q": (0.25, 0.25, 0.25), "hx": (0.5, 0.0, 0.0), "h": (0.5, 0.5, 0.5)}
 SEEDS = (1, 2, 3)
@@ -130,7 +132,7 @@ def chain(d, name, seg, table):
     w.mkdir(exist_ok=True)
     if not (w / "run_hemi-R_report.json").exists():
         t0 = time.time()
-        run([SURFX, "run", seg, "--labels", table, "-o", w / "run"], w / "run.log")
+        run([SURFX, "run", seg, "--labels", table, "-o", w / "run", *RUN_ARGS], w / "run.log")
         (w / "seconds.txt").write_text(f"{time.time() - t0:.1f}\n")
     return w
 
