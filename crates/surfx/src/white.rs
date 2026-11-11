@@ -36,6 +36,15 @@ impl TopologyArg {
     }
 }
 
+/// Lissage de la surface blanche après marching cubes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SmoothingArg {
+    /// Taubin (défaut)
+    Taubin,
+    /// Minimisation d'une énergie : attache aux faces de voxels de l'objet corrigé + flexion (Q1.2, option)
+    Energy,
+}
+
 /// Paramètres de la surface blanche.
 #[derive(Debug, Clone, clap::Args)]
 pub struct WhiteParams {
@@ -45,6 +54,18 @@ pub struct WhiteParams {
     /// Écart-type (mm) du flou de la distance signée avant extraction
     #[arg(long, default_value_t = 0.25)]
     pub sigma: f64,
+    /// Lissage : `taubin` (défaut) ou `energy` (attache aux données et flexion, réglages `--smooth-*`)
+    #[arg(long, value_enum, default_value = "taubin")]
+    pub smoothing: SmoothingArg,
+    /// `energy` : poids de flexion w_b (mm⁴) devant l'attache aux données (poids 1)
+    #[arg(long, default_value_t = 0.03)]
+    pub smooth_wb: f64,
+    /// `energy` : nombre de pas
+    #[arg(long, default_value_t = 20)]
+    pub smooth_steps: usize,
+    /// `energy` : pas proximal τ (sans dimension)
+    #[arg(long, default_value_t = 0.25)]
+    pub smooth_tau: f64,
     /// Nombre de paires de pas de Taubin
     #[arg(long, default_value_t = 10)]
     pub taubin: usize,
@@ -134,6 +155,23 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     // sommets restent entre les centres des voxels de part et d'autre de la frontière de l'objet corrigé.
     let mut held = 0;
     match params.band_in {
+        None if params.smoothing == SmoothingArg::Energy => {
+            let phi0 = crate::smoothing::object_distance(&c.object);
+            let ep = crate::smoothing::EnergyParams {
+                w_b: params.smooth_wb,
+                steps: params.smooth_steps,
+                tau: params.smooth_tau,
+                ..Default::default()
+            };
+            let r = crate::smoothing::energy_smoothing(&mut mesh, &phi0, &ep);
+            held += r.held;
+            if std::env::var_os("SURFX_DEBUG").is_some() {
+                eprintln!(
+                    "lissage energy : attache {:.4e} -> {:.4e}, flexion {:.4e} -> {:.4e}, {} sommets tenus, {} it. CG",
+                    r.start.0, r.end.0, r.start.1, r.end.1, r.held, r.cg_iterations
+                );
+            }
+        }
         Some(band_in) => {
             let phi0 = signed_distance(&c.object);
             let (outer, inner) = (0.8 * min_spacing, band_in * min_spacing);

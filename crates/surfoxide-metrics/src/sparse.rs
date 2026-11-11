@@ -42,6 +42,12 @@ impl Csr {
         self.n
     }
 
+    /// Éléments non nuls de la ligne `i` : (colonne, valeur).
+    pub fn row(&self, i: usize) -> impl Iterator<Item = (u32, f64)> + '_ {
+        let r = self.row_start[i]..self.row_start[i + 1];
+        self.cols[r.clone()].iter().copied().zip(self.vals[r].iter().copied())
+    }
+
     /// Diagonale de la matrice.
     pub fn diagonal(&self) -> Vec<f64> {
         (0..self.n)

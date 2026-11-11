@@ -25,6 +25,7 @@ mod dataset;
 mod eval;
 mod phantom;
 mod profile;
+mod smoothing;
 mod white;
 
 use std::path::PathBuf;
