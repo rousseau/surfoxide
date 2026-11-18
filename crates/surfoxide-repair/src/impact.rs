@@ -712,4 +712,170 @@ mod tests {
             assert!(held > 0, "le test doit exercer des retours");
         }
     }
+
+    #[test]
+    fn contact_exactement_a_la_fin_du_pas_et_tolerance_de_bord() {
+        // Le sommet arrive pile sur le triangle à t = 1 : le contact compte.
+        let t = temps_sommet_face(([0.25, 0.25, 1.0], [0.25, 0.25, 0.0]), (TRI, TRI), 1.0).unwrap();
+        assert!(proche(t, 1.0), "{t}");
+        // Tombe sur l'hypoténuse (x + y = 1) : compté ; à 5e-7 en dehors (dans la tolérance de 1e-6) : compté ;
+        // à 5e-6 en dehors : manqué.
+        for (dx, contact) in [(0.0, true), (5e-7, true), (5e-6, false)] {
+            let x = [0.5 + dx, 0.5, 1.0];
+            let r = temps_sommet_face((x, [x[0], x[1], -1.0]), (TRI, TRI), 1.0);
+            assert_eq!(r.is_some(), contact, "dx = {dx} : {r:?}");
+        }
+    }
+
+    #[test]
+    fn la_variante_applique_exactement_08_t_etoile() {
+        assert_eq!(MARGE, 0.8);
+        let mut s = icosphere(2, 10.0);
+        let mut new = s.vertices().to_vec();
+        new[0] = vec3::add(vec3::scale(new[0], -1.3), [1.0, 0.7, 0.3]);
+        let depart = s.vertices()[0];
+        let t0 = fractions_avant_contact(&s, &new, None)[0].unwrap();
+        crate::safe_update_impact(&mut s, &new, None);
+        let attendu = vec3::lerp(depart, new[0], 0.8 * t0);
+        assert!(
+            vec3::dist(s.vertices()[0], attendu) < 1e-12,
+            "{:?} / {attendu:?}",
+            s.vertices()[0]
+        );
+    }
+
+    /// Triangle minuscule autour de `c` (obstacle quasi ponctuel).
+    fn minuscule(c: Vec3) -> TriMesh {
+        let e = 0.01;
+        TriMesh::new(
+            vec![
+                vec3::add(c, [e, 0.0, 0.0]),
+                vec3::add(c, [-e, e, 0.0]),
+                vec3::add(c, [-e, -e, 0.0]),
+            ],
+            vec![[0, 1, 2]],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn la_face_mobile_touche_un_sommet_fixe() {
+        // La sphère rétrécit (x0,3 ; r de 10 à 3) autour d'un obstacle quasi ponctuel sur l'axe de la face 0, à r = 6,9.
+        let s = icosphere(2, 10.0);
+        let f0 = s.faces()[0];
+        let v = s.vertices();
+        let centre = vec3::scale(
+            vec3::add(vec3::add(v[f0[0] as usize], v[f0[1] as usize]), v[f0[2] as usize]),
+            1.0 / 3.0,
+        );
+        let obstacle = minuscule(vec3::scale(centre, 0.69));
+        let new: Vec<Vec3> = v.iter().map(|p| vec3::scale(*p, 0.3)).collect();
+        let t = fractions_avant_contact(&s, &new, Some(&obstacle));
+        // Rayon du centre de la face : |centre| ≈ 9,9 ; contact quand (1 − 0,7 t) |centre| = 0,69 |centre|, t = 0,31/0,7.
+        for &i in &f0 {
+            let ti = t[i as usize].expect("sommet de la face 0");
+            assert!((ti - 0.31 / 0.7).abs() < 0.01, "{ti}");
+        }
+        assert!(
+            t.iter().filter(|x| x.is_some()).count() <= 6,
+            "contact limité au voisinage de la face 0"
+        );
+    }
+
+    #[test]
+    fn le_sommet_mobile_touche_une_face_fixe() {
+        // Une grande face fixe horizontale en z = −12 ; la sphère descend de 5 : seuls les sommets les plus bas la
+        // touchent, quand z_min − 5 t = −12.
+        let s = icosphere(2, 10.0);
+        let zmin = s.vertices().iter().map(|p| p[2]).fold(f64::INFINITY, f64::min);
+        let sol = TriMesh::new(
+            vec![[-80.0, -80.0, -12.0], [80.0, -80.0, -12.0], [0.0, 90.0, -12.0]],
+            vec![[0, 1, 2]],
+        )
+        .unwrap();
+        let new: Vec<Vec3> = s.vertices().iter().map(|p| [p[0], p[1], p[2] - 5.0]).collect();
+        let t = fractions_avant_contact(&s, &new, Some(&sol));
+        let attendu = (12.0 + zmin) / 5.0;
+        let bas = s.vertices().iter().position(|p| p[2] == zmin).unwrap();
+        assert!((t[bas].unwrap() - attendu).abs() < 1e-9, "{:?} / {attendu}", t[bas]);
+        let premier = t.iter().flatten().fold(f64::INFINITY, |m, &x| m.min(x));
+        assert!((premier - attendu).abs() < 1e-9);
+    }
+
+    #[test]
+    fn l_arete_mobile_croise_une_arete_fixe() {
+        // Une longue aiguille (triangle dégénéré) le long de x à y = 6, z = 0, dont les extrémités sont loin de la
+        // sphère ; la sphère gonfle de r = 3 à r = 10. Seul un contact arête contre arête est possible.
+        let s = icosphere(2, 3.0);
+        let aiguille = TriMesh::new(
+            vec![[-50.0, 6.0, 0.137], [50.0, 6.0, 0.137], [0.0, 6.001, 0.138]],
+            vec![[0, 1, 2]],
+        )
+        .unwrap();
+        let new: Vec<Vec3> = s.vertices().iter().map(|p| vec3::scale(*p, 10.0 / 3.0)).collect();
+        let t = fractions_avant_contact(&s, &new, Some(&aiguille));
+        let premier = t.iter().flatten().fold(f64::INFINITY, |m, &x| m.min(x));
+        // r(t) = 3 + 7 t atteint 6 à t = 3/7 ; la surface polyédrique est un peu en deçà du rayon des sommets.
+        assert!(premier > 0.42 && premier < 0.52, "{premier}");
+    }
+
+    #[test]
+    fn deux_barres_croisees_se_touchent_par_leurs_aretes() {
+        // Deux lamelles minces : l'une le long de x en z = 0, l'autre le long de y en z = 1 qui descend de 2.
+        // Aucun sommet n'est dans l'autre lamelle : seul un contact arête contre arête existe, à t = 1/2.
+        let m = TriMesh::new(
+            vec![
+                [-5.0, 0.0, 0.0],
+                [5.0, 0.0, 0.0],
+                [5.0, 0.1, 0.0],
+                [0.0, -5.0, 1.0],
+                [0.0, 5.0, 1.0],
+                [0.1, 5.0, 1.0],
+            ],
+            vec![[0, 1, 2], [3, 4, 5]],
+        )
+        .unwrap();
+        let mut new = m.vertices().to_vec();
+        for p in &mut new[3..] {
+            p[2] -= 2.0;
+        }
+        let t = fractions_avant_contact(&m, &new, None);
+        assert!(t[..3].iter().all(|x| x.is_none()), "{t:?}");
+        for x in &t[3..] {
+            assert!(proche(x.expect("contact attendu"), 0.5), "{t:?}");
+        }
+    }
+
+    #[test]
+    fn maintenu_signifie_moins_de_10_pour_cent_du_pas() {
+        // Un sommet traverse la sphère de part en part : il avance de 0,8 t* = 1,6 / (1 + k) de son pas (k = 4,33 :
+        // 30 %, k = 20 : 7,6 %). Seul le second est « maintenu » au sens de Q2.0.
+        for (k, maintenus) in [(4.33, 0), (20.0, 1)] {
+            let mut s = icosphere(2, 10.0);
+            let mut new = s.vertices().to_vec();
+            new[0] = vec3::add(vec3::scale(new[0], -k), [1.0, 0.7, 0.3]);
+            let mut st = crate::StepStats::default();
+            crate::safe_step(&mut s, &new, crate::SafeUpdateMode::Impact, &mut st);
+            assert_eq!(st.held_tenth, maintenus, "k = {k} : {st:?}");
+            assert_eq!(st.held, 0, "k = {k} : {st:?}");
+        }
+    }
+
+    #[test]
+    fn bilan_du_pas_exact() {
+        // Un sommet avance sans obstacle de 0,5 mm vers l'extérieur ; un autre est forcé de reculer (maintenu).
+        let mut s = icosphere(3, 10.0);
+        let mut new = s.vertices().to_vec();
+        new[5] = vec3::scale(new[5], 1.05); // 0,5 mm
+        new[0] = vec3::scale(new[0], -1.3); // maintenu par le défaut
+        let mut st = crate::StepStats::default();
+        crate::safe_step(&mut s, &new, crate::SafeUpdateMode::Binary, &mut st);
+        let demande0 = vec3::dist(icosphere(3, 10.0).vertices()[0], new[0]);
+        assert!((st.requested - (0.5 + demande0)).abs() < 1e-9, "{st:?}");
+        assert!((st.applied - 0.5).abs() < 1e-9, "{st:?}");
+        assert_eq!(st.held_tenth, 1);
+        assert!(st.held >= 1);
+        assert!((st.lost_fraction() - demande0 / (0.5 + demande0)).abs() < 1e-9);
+        assert_eq!(crate::StepStats::default().lost_fraction(), 0.0);
+    }
 }
