@@ -9,6 +9,8 @@
 //! - [`repair_intersections`] : lissage laplacien restreint au voisinage des faces fautives, élargi tant
 //!   que des intersections subsistent.
 
+pub mod impact;
+
 use std::collections::HashSet;
 
 use surfoxide_check::{cross_intersections, cross_intersections_among, self_intersections, self_intersections_among};
@@ -119,6 +121,77 @@ pub fn safe_update_with(
         faces.sort_unstable();
         faces.dedup();
         region = Some(Region { faces, margin });
+    }
+}
+
+/// Variante de [`safe_update_against`] au temps d'impact (Q2.0) : au lieu du retour tout ou rien, chaque sommet
+/// qui toucherait la surface (ou `obstacle`) pendant le pas n'avance que de `0,8 t*` de son déplacement
+/// ([`impact::fractions_avant_contact`], [`impact::MARGE`]) ; les autres avancent en entier. Le même contrôle final
+/// que [`safe_update_against`] ramène à leur ancienne position les sommets encore en conflit : la garantie du
+/// contrat ne repose pas sur la détection continue, qui sert à perdre moins de déplacement. Rend le nombre de
+/// sommets que ce contrôle final a maintenus en place.
+pub fn safe_update_impact(mesh: &mut TriMesh, new: &[Vec3], obstacle: Option<&TriMesh>) -> usize {
+    let t = impact::fractions_avant_contact(mesh, new, obstacle);
+    let old = mesh.vertices();
+    let reduit: Vec<Vec3> = (0..new.len())
+        .map(|v| match t[v] {
+            None => new[v],
+            Some(t) => vec3::lerp(old[v], new[v], impact::MARGE * t),
+        })
+        .collect();
+    safe_update_against(mesh, &reduit, obstacle)
+}
+
+/// Manière d'appliquer un pas de lissage à une surface saine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SafeUpdateMode {
+    /// [`safe_update`] : retour tout ou rien des sommets en conflit (défaut).
+    #[default]
+    Binary,
+    /// [`safe_update_impact`] : fraction `0,8 t*` du pas.
+    Impact,
+}
+
+/// Cumul sur les pas d'un lissage.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct StepStats {
+    /// Sommets ramenés à leur position de départ par le contrôle final (ce que rend `safe_update`).
+    pub held: usize,
+    /// Sommets dont le déplacement appliqué est inférieur à 10 % du déplacement demandé (le défaut binaire y est
+    /// inclus : 0 ou 100 %).
+    pub held_tenth: usize,
+    /// Somme des déplacements demandés (mm).
+    pub requested: f64,
+    /// Somme des déplacements appliqués (mm).
+    pub applied: f64,
+}
+
+impl StepStats {
+    /// Fraction de déplacement perdu `Σ(demandé − appliqué) / Σ demandé` (0 si rien n'était demandé).
+    pub fn lost_fraction(&self) -> f64 {
+        if self.requested > 0.0 {
+            (self.requested - self.applied) / self.requested
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Applique un pas de lissage `new` à `mesh` selon `mode` et le cumule dans `stats`. Avec
+/// [`SafeUpdateMode::Binary`], la surface obtenue est exactement celle de [`safe_update`].
+pub fn safe_step(mesh: &mut TriMesh, new: &[Vec3], mode: SafeUpdateMode, stats: &mut StepStats) {
+    let old = mesh.vertices().to_vec();
+    stats.held += match mode {
+        SafeUpdateMode::Binary => safe_update(mesh, new),
+        SafeUpdateMode::Impact => safe_update_impact(mesh, new, None),
+    };
+    for ((o, n), a) in old.iter().zip(new).zip(mesh.vertices()) {
+        let (demande, applique) = (vec3::dist(*o, *n), vec3::dist(*o, *a));
+        stats.requested += demande;
+        stats.applied += applique;
+        if demande > 0.0 && applique < 0.1 * demande {
+            stats.held_tenth += 1;
+        }
     }
 }
 

@@ -36,6 +36,24 @@ impl TopologyArg {
     }
 }
 
+/// Manière d'appliquer un pas de lissage sans créer d'intersection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SafeUpdateArg {
+    /// Retour tout ou rien des sommets en conflit : défaut
+    Binary,
+    /// Garde-fou au temps d'impact (Q2.0) : un sommet qui toucherait la surface n'avance que de 0,8 t* de son pas
+    Impact,
+}
+
+impl SafeUpdateArg {
+    fn mode(self) -> surfoxide_repair::SafeUpdateMode {
+        match self {
+            SafeUpdateArg::Binary => surfoxide_repair::SafeUpdateMode::Binary,
+            SafeUpdateArg::Impact => surfoxide_repair::SafeUpdateMode::Impact,
+        }
+    }
+}
+
 /// Paramètres de la surface blanche.
 #[derive(Debug, Clone, clap::Args)]
 pub struct WhiteParams {
@@ -45,6 +63,10 @@ pub struct WhiteParams {
     /// Écart-type (mm) du flou de la distance signée avant extraction
     #[arg(long, default_value_t = 0.25)]
     pub sigma: f64,
+    /// Application des pas de lissage : `binary` (retour tout ou rien des sommets en conflit) ou `impact`
+    /// (détection continue : 0,8 t* du pas) ; dans les deux cas le contrôle final reste le même
+    #[arg(long, value_enum, default_value = "binary")]
+    pub safe_update: SafeUpdateArg,
     /// Nombre de paires de pas de Taubin
     #[arg(long, default_value_t = 10)]
     pub taubin: usize,
@@ -112,6 +134,8 @@ pub struct WhiteSurface {
     pub final_from_outer: bool,
     /// Sommets maintenus en place pendant le lissage (cumul sur les pas).
     pub held: usize,
+    /// Cumul du lissage : sommets maintenus, sommets à moins de 10 % du pas demandé, déplacement demandé et appliqué.
+    pub smoothing: surfoxide_repair::StepStats,
     /// Réparation après remaillage.
     pub repair: surfoxide_repair::RepairReport,
     /// Remaillage abandonné (réparation impossible) : surface lissée non remaillée.
@@ -132,21 +156,22 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
     debug_topology("marching cubes", &mesh);
     // Lissage pas à pas : un pas qui ferait se couper la surface est annulé localement. Avec une bande, les
     // sommets restent entre les centres des voxels de part et d'autre de la frontière de l'objet corrigé.
-    let mut held = 0;
+    let mut stats = surfoxide_repair::StepStats::default();
+    let mode = params.safe_update.mode();
     match params.band_in {
         Some(band_in) => {
             let phi0 = signed_distance(&c.object);
             let (outer, inner) = (0.8 * min_spacing, band_in * min_spacing);
             for _ in 0..50 {
                 let trial = surfoxide_extract::constrained_taubin(&mesh, &phi0, outer, inner, params.lambda, 0.0);
-                held += surfoxide_repair::safe_update(&mut mesh, &trial);
+                surfoxide_repair::safe_step(&mut mesh, &trial, mode, &mut stats);
             }
         }
         None => {
             for _ in 0..params.taubin {
                 let mut trial = mesh.clone();
                 surfoxide_extract::taubin(&mut trial, 1, params.lambda, -1.06 * params.lambda);
-                held += surfoxide_repair::safe_update(&mut mesh, trial.vertices());
+                surfoxide_repair::safe_step(&mut mesh, trial.vertices(), mode, &mut stats);
             }
         }
     }
@@ -194,7 +219,8 @@ pub fn white_surface(mask: &Volume<bool>, params: &WhiteParams) -> Result<WhiteS
         defects: c.defects,
         unrecovered: c.unrecovered,
         final_from_outer: c.final_from_outer,
-        held,
+        held: stats.held,
+        smoothing: stats,
         repair,
         remesh_dropped,
         tangled,
@@ -674,6 +700,14 @@ pub fn run(
         let mut report = serde_json::json!({
             "white": white_report,
             "remesh_dropped": w.remesh_dropped,
+            "smoothing": {
+                "safe_update": format!("{:?}", params.safe_update).to_lowercase(),
+                "held": w.smoothing.held,
+                "held_tenth": w.smoothing.held_tenth,
+                "requested_mm": w.smoothing.requested,
+                "applied_mm": w.smoothing.applied,
+                "lost_fraction": w.smoothing.lost_fraction(),
+            },
             "topology": topology_report_json(&w),
         });
         let mut valid = white_report.valid && pial_error.is_none();
@@ -877,5 +911,45 @@ mod tests {
         assert_eq!(a.blanche.topology.strategy(), Strategy::Best);
         let a = Analyse::parse_from(["surfx", "--topology", "per-defect"]);
         assert_eq!(a.blanche.topology.strategy(), Strategy::PerDefect);
+    }
+
+    #[test]
+    fn le_garde_fou_par_defaut_est_binaire() {
+        let a = Analyse::parse_from(["surfx"]);
+        assert_eq!(a.blanche.safe_update, SafeUpdateArg::Binary);
+        assert_eq!(a.blanche.safe_update.mode(), surfoxide_repair::SafeUpdateMode::Binary);
+        let a = Analyse::parse_from(["surfx", "--safe-update", "impact"]);
+        assert_eq!(a.blanche.safe_update.mode(), surfoxide_repair::SafeUpdateMode::Impact);
+    }
+
+    /// Boule percée d'une fente étroite (un sillon d'un voxel) : le lissage y approche des faces de la paroi opposée.
+    fn boule_a_fente() -> Volume<bool> {
+        let n = 40;
+        let c = (n as f64 - 1.0) / 2.0;
+        let mut v = Volume::filled([n, n, n], false, surfoxide_core::volume::IDENTITY);
+        for k in 0..n {
+            for j in 0..n {
+                for i in 0..n {
+                    let d2 = (i as f64 - c).powi(2) + (j as f64 - c).powi(2) + (k as f64 - c).powi(2);
+                    let fente = (i as f64 - c).abs() < 0.8 && j as f64 > c;
+                    v.set(i, j, k, d2 < 15.0 * 15.0 && !fente);
+                }
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn les_deux_garde_fous_livrent_une_surface_conforme() {
+        let masque = boule_a_fente();
+        for mode in ["binary", "impact"] {
+            let a = Analyse::parse_from(["surfx", "--safe-update", mode]);
+            let w = white_surface(&masque, &a.blanche).unwrap();
+            let r = surfoxide_check::check_surface(&w.mesh);
+            assert!(r.valid, "{mode} : {r:?}");
+            assert_eq!(r.genus, Some(0), "{mode}");
+            assert!(w.smoothing.requested > 0.0, "{mode}");
+            assert!(w.smoothing.applied <= w.smoothing.requested + 1e-9, "{mode}");
+        }
     }
 }
