@@ -238,6 +238,13 @@ mod tests {
             let exclu = BIDS_ARGS.contains(&id) || FREE_IO.contains(&id) || id == "help" || id == "version";
             assert_eq!(present, !exclu, "paramètre {id}");
         }
+        // Ni les arguments BIDS ni les chemins du mode libre ne sont des paramètres (liste écrite ici, pas la constante).
+        for absent in ["bids", "participant", "session", "output_dir", "seg", "out"] {
+            assert!(
+                params.iter().all(|p| p["id"] != absent),
+                "{absent} ne doit pas être un paramètre"
+            );
+        }
         let by = |id: &str| params.iter().find(|p| p["id"] == id).unwrap().clone();
         assert_eq!(by("sigma")["type"], "number");
         assert_eq!(by("sigma")["default"], 0.25);
