@@ -8,6 +8,7 @@
 //! - `segqc` : contrôle de la segmentation (substance blanche ou cortex au contact du fond : tissu étiqueté fond).
 //! - `mask` : masque blanc fermé d'un hémisphère à partir d'une segmentation (multi-)BOUNTI.
 //! - `white` : surface blanche (WM/GM) de genre 0 de chaque hémisphère, en GIfTI.
+//! - `--describe` : description JSON des commandes lançables par guioxide (schéma `oxide-describe/1`, `describe.rs`).
 //! - `run` : surfaces blanche et piale de chaque hémisphère, épaisseur et rapport de contrat ; avec `--bids`,
 //!   lit la segmentation de `medx bounti --bids` et écrit les dérivées `surfx-surfaces` (contrat de guioxide).
 //! - `eval` : distance d'une surface à la frontière de la segmentation, qualité du maillage, contrat.
@@ -22,6 +23,7 @@
 
 mod compare;
 mod dataset;
+mod describe;
 mod eval;
 mod phantom;
 mod profile;
@@ -32,7 +34,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use burn::prelude::{Device, Tensor, TensorData};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use surfoxide_core::{shapes, topology_report, Hemisphere, TriMesh};
 use surfoxide_mask::LabelTable;
 
@@ -40,11 +42,16 @@ use surfoxide_mask::LabelTable;
 #[command(
     name = "surfx",
     version,
-    about = "Boîte à outils surfoxide pour les surfaces corticales"
+    about = "Boîte à outils surfoxide pour les surfaces corticales",
+    arg_required_else_help = true
 )]
 struct Cli {
+    /// Imprime sur la sortie standard la description JSON des commandes que guioxide peut lancer (schéma
+    /// `oxide-describe/1`) et sort ; ne lit ni n'écrit rien d'autre
+    #[arg(long)]
+    describe: bool,
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 /// Longueur caractéristique de la DPF*, telle qu'écrite sur la ligne de commande (`--length`).
@@ -496,7 +503,24 @@ fn contract(valid: bool) -> Result<(), String> {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let result = match cli.command {
+    if cli.describe {
+        match serde_json::to_string_pretty(&describe::document()) {
+            Ok(text) => {
+                println!("{text}");
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                eprintln!("erreur : {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let Some(command) = cli.command else {
+        // `arg_required_else_help` écarte déjà l'appel sans argument ; reste `--describe` seul, traité plus haut.
+        let _ = Cli::command().print_help();
+        return ExitCode::from(2);
+    };
+    let result = match command {
         Command::Device { backend, size } => run_device(backend, size),
         Command::Selftest => {
             print_report("icosphère (4)", &shapes::icosphere(4, 1.0));
