@@ -81,7 +81,14 @@ impl Bvh {
             .iter()
             .map(|f| Aabb::of_points(&f.map(|i| v[i as usize])))
             .collect();
-        let mut items: Vec<u32> = (0..mesh.n_faces() as u32).collect();
+        Self::from_boxes(face_boxes)
+    }
+
+    /// Hiérarchie sur des boîtes de faces données (la face `f` a la boîte `face_boxes[f]`). Une boîte peut
+    /// contenir plus que la face, par exemple toutes ses positions au cours d'un pas : les requêtes rendent
+    /// alors un sur-ensemble des faces candidates, que le test exact trie ensuite.
+    pub fn from_boxes(face_boxes: Vec<Aabb>) -> Self {
+        let mut items: Vec<u32> = (0..face_boxes.len() as u32).collect();
         let mut nodes = vec![Node {
             bbox: Aabb::EMPTY,
             start: 0,
