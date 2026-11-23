@@ -155,8 +155,11 @@ impl HalfEdgeMesh {
 
     /// Réécrit les faces `group` (déjà modifiées, sauf celles listées dans `killed`) et recâble les
     /// jumelles. `external` : jumelles extérieures relevées avant la modification, par (départ, arrivée)
-    /// de la demi-arête intérieure.
-    fn relink(&mut self, group: &[usize], external: &[((u32, u32), u32)]) {
+    /// de la demi-arête intérieure. Toutes les jumelles sont cherchées avant d'écrire : s'il en manque une
+    /// (l'opération ferait une surface qui n'est plus une 2-variété), rien n'est écrit et la fonction rend
+    /// `false`, pour que l'appelant annule l'opération.
+    #[must_use]
+    fn relink(&mut self, group: &[usize], external: &[((u32, u32), u32)]) -> bool {
         let mut local: Vec<((u32, u32), u32)> = Vec::with_capacity(group.len() * 3);
         for &f in group {
             if !self.face_alive[f] {
@@ -167,17 +170,24 @@ impl HalfEdgeMesh {
                 local.push(((self.from(h), self.to(h)), h));
             }
         }
+        let mut links: Vec<(u32, u32, u32)> = Vec::with_capacity(local.len());
         for &((a, b), h) in &local {
-            let t = local
+            let Some(t) = local
                 .iter()
                 .find(|(k, _)| *k == (b, a))
                 .map(|&(_, g)| g)
                 .or_else(|| external.iter().find(|(k, _)| *k == (a, b)).map(|&(_, g)| g))
-                .expect("jumelle introuvable");
+            else {
+                return false;
+            };
+            links.push((h, t, a));
+        }
+        for (h, t, a) in links {
             self.twin[h as usize] = t;
             self.twin[t as usize] = h;
             self.out[a as usize] = h;
         }
+        true
     }
 
     /// Jumelles extérieures au groupe de faces `group`.
@@ -202,14 +212,16 @@ impl HalfEdgeMesh {
         self.faces.len() - 1
     }
 
-    /// Coupe l'arête `h` en son milieu ; rend le nouveau sommet.
-    pub fn split(&mut self, h: u32) -> u32 {
+    /// Coupe l'arête `h` en son milieu ; rend le nouveau sommet, ou `None` (maillage inchangé) si le
+    /// recâblage échoue.
+    pub fn split(&mut self, h: u32) -> Option<u32> {
         let g = self.twin(h);
         let (f1, f2) = ((h / 3) as usize, (g / 3) as usize);
         let (a, b) = (self.from(h), self.to(h));
         let c = self.to(self.next(h));
         let d = self.to(self.next(g));
         let ext = self.externals(&[f1, f2]);
+        let saved = (self.faces[f1], self.faces[f2], self.faces.len());
         let m = self.pos.len() as u32;
         self.pos
             .push(vec3::lerp(self.pos[a as usize], self.pos[b as usize], 0.5));
@@ -220,8 +232,17 @@ impl HalfEdgeMesh {
         self.faces[f2] = [m, a, d];
         let f3 = self.add_face([m, b, c]);
         let f4 = self.add_face([b, m, d]);
-        self.relink(&[f1, f2, f3, f4], &ext);
-        m
+        if !self.relink(&[f1, f2, f3, f4], &ext) {
+            (self.faces[f1], self.faces[f2]) = (saved.0, saved.1);
+            self.faces.truncate(saved.2);
+            self.face_alive.truncate(saved.2);
+            self.twin.truncate(3 * saved.2);
+            self.pos.pop();
+            self.vertex_alive.pop();
+            self.out.pop();
+            return None;
+        }
+        Some(m)
     }
 
     /// Bascule l'arête `h` (a→b) entre (a, b, c) et (b, a, d) en (c, d) ; refusée si c et d sont déjà
@@ -236,9 +257,13 @@ impl HalfEdgeMesh {
             return false;
         }
         let ext = self.externals(&[f1, f2]);
+        let saved = (self.faces[f1], self.faces[f2]);
         self.faces[f1] = [a, d, c];
         self.faces[f2] = [d, b, c];
-        self.relink(&[f1, f2], &ext);
+        if !self.relink(&[f1, f2], &ext) {
+            (self.faces[f1], self.faces[f2]) = saved;
+            return false;
+        }
         true
     }
 
@@ -256,13 +281,16 @@ impl HalfEdgeMesh {
     }
 
     /// Fusionne l'arête `h` (a→b) : a disparaît, b est placé en `p`. À n'appeler qu'après
-    /// [`Self::can_collapse`].
-    pub fn collapse(&mut self, h: u32, p: Vec3) {
+    /// [`Self::can_collapse`]. Rend `false` (maillage inchangé) si le recâblage échoue.
+    #[must_use]
+    pub fn collapse(&mut self, h: u32, p: Vec3) -> bool {
         let g = self.twin(h);
         let (f1, f2) = ((h / 3) as usize, (g / 3) as usize);
         let (a, b) = (self.from(h), self.to(h));
         let group: Vec<usize> = self.outgoing(a).into_iter().map(|e| (e / 3) as usize).collect();
         let ext = self.externals(&group);
+        let saved: Vec<[u32; 3]> = group.iter().map(|&f| self.faces[f]).collect();
+        let saved_pos = self.pos[b as usize];
         self.face_alive[f1] = false;
         self.face_alive[f2] = false;
         for &f in &group {
@@ -277,7 +305,16 @@ impl HalfEdgeMesh {
         // Les arêtes extérieures de f1 (b–c) et de f2 (d–b) sont reprises, avec la même clé, par les faces
         // voisines où a vient d'être renommé en b : le recâblage les retrouve par (départ, arrivée).
         let live: Vec<usize> = group.iter().copied().filter(|&f| self.face_alive[f]).collect();
-        self.relink(&live, &ext);
+        if !self.relink(&live, &ext) {
+            for (&f, &t) in group.iter().zip(&saved) {
+                self.faces[f] = t;
+            }
+            self.face_alive[f1] = true;
+            self.face_alive[f2] = true;
+            self.vertex_alive[a as usize] = true;
+            self.pos[b as usize] = saved_pos;
+            return false;
+        }
         for &f in &live {
             for &v in &self.faces[f] {
                 if self.vertex_alive[v as usize] {
@@ -286,6 +323,7 @@ impl HalfEdgeMesh {
                 }
             }
         }
+        true
     }
 
     /// Demi-arêtes vivantes, une par arête (celle de plus petit indice).
@@ -325,7 +363,7 @@ mod tests {
     fn coupures_bascules_fusions_preservent_la_sphere() {
         let mut m = HalfEdgeMesh::from_mesh(&icosphere(2, 1.0)).unwrap();
         for h in m.edges().into_iter().step_by(3) {
-            m.split(h);
+            assert!(m.split(h).is_some());
         }
         check(&m);
         let mut flips = 0;
@@ -338,11 +376,59 @@ mod tests {
         for h in m.edges().into_iter().step_by(7) {
             if m.face_alive[(h / 3) as usize] && m.can_collapse(h) {
                 let p = m.pos[m.to(h) as usize];
-                m.collapse(h, p);
+                assert!(m.collapse(h, p));
                 collapses += 1;
                 check(&m);
             }
         }
         assert!(collapses > 0);
+    }
+
+    #[test]
+    fn operation_impossible_a_recabler_refusee_sans_rien_changer() {
+        // Structure abîmée : la jumelle de `h` désigne une demi-arête d'une face éloignée. Le recâblage de
+        // la coupure, de la bascule ou de la fusion de `h` est impossible : l'opération doit être refusée en
+        // laissant le maillage exactement tel quel, au lieu de paniquer (« jumelle introuvable »).
+        let base = HalfEdgeMesh::from_mesh(&icosphere(2, 1.0)).unwrap();
+        let h = 0u32;
+        let far = (base.faces.len() as u32 - 1) * 3;
+        let near: Vec<u32> = base.faces[0].iter().flat_map(|&v| base.neighbors(v)).collect();
+        assert!(
+            base.faces[(far / 3) as usize].iter().all(|v| !near.contains(v)),
+            "face pas assez loin"
+        );
+        let mut abime = base.clone();
+        abime.twin[h as usize] = far;
+        let pareil = |m: &HalfEdgeMesh| {
+            assert_eq!(m.pos, abime.pos);
+            assert_eq!(m.faces, abime.faces);
+            assert_eq!(m.face_alive, abime.face_alive);
+            assert_eq!(m.vertex_alive, abime.vertex_alive);
+            assert_eq!(m.twin, abime.twin);
+            assert_eq!(m.out, abime.out);
+        };
+        let mut m = abime.clone();
+        assert_eq!(m.split(h), None);
+        pareil(&m);
+        assert!(!m.flip(h));
+        pareil(&m);
+        // La fusion ne lit pas la jumelle de `h` pour recâbler, mais celle de l'arête suivante (b → c), qui
+        // fournit la jumelle extérieure de l'arête reprise par la face voisine : on l'abîme à son tour.
+        // Fusion au milieu de l'arête : la position de b change, et doit être rétablie.
+        let p = vec3::lerp(m.pos[m.from(h) as usize], m.pos[m.to(h) as usize], 0.5);
+        let mut m = base.clone();
+        m.twin[base.next(h) as usize] = h;
+        let abime = m.clone();
+        assert!(!m.collapse(h, p));
+        assert_eq!(m.pos, abime.pos);
+        assert_eq!(m.faces, abime.faces);
+        assert_eq!(m.face_alive, abime.face_alive);
+        assert_eq!(m.vertex_alive, abime.vertex_alive);
+        assert_eq!(m.twin, abime.twin);
+        assert_eq!(m.out, abime.out);
+        // Sur la structure saine, les mêmes opérations passent.
+        assert!(base.clone().split(h).is_some());
+        assert!(base.clone().flip(h));
+        assert!(base.can_collapse(h) && base.clone().collapse(h, p));
     }
 }
