@@ -40,8 +40,9 @@ fn split_long_edges(m: &mut HalfEdgeMesh, high: f64) {
     loop {
         let mut changed = false;
         for h in m.edges() {
-            if m.face_alive[(h / 3) as usize] && m.edge_length(h) > high {
-                m.split(h);
+            // Une coupure refusée (recâblage impossible) ne compte pas comme un changement : l'arête resterait
+            // longue à chaque passage et la boucle ne finirait pas.
+            if m.face_alive[(h / 3) as usize] && m.edge_length(h) > high && m.split(h).is_some() {
                 changed = true;
             }
         }
@@ -87,8 +88,9 @@ fn collapse_short(m: &mut HalfEdgeMesh, low: f64, high: f64) {
                 }
             }
         }
+        // Fusion refusée par le recâblage : l'arête reste, le maillage est inchangé.
         if ok {
-            m.collapse(h, p);
+            let _ = m.collapse(h, p);
         }
     }
 }
@@ -226,8 +228,7 @@ pub fn unfold(mesh: &TriMesh, max_cos: f64, passes: usize) -> Result<(TriMesh, u
                         vec3::norm(vec3::triangle_normal(q[0], q[1], q[2])) < 1e-10
                     })
                 });
-                if !degenerate {
-                    m.collapse(e, p);
+                if !degenerate && m.collapse(e, p) {
                     break;
                 }
             }
@@ -390,7 +391,9 @@ pub fn open_cones(mesh: &TriMesh, min_cos: f64, passes: usize) -> Result<(TriMes
                     let (a, b) = (m.pos[m.from(h) as usize], m.pos[m.to(h) as usize]);
                     for p in [a, b, vec3::lerp(a, b, 0.5)] {
                         let mut trial = m.clone();
-                        trial.collapse(h, p);
+                        if !trial.collapse(h, p) {
+                            continue;
+                        }
                         let score = worst_of(&trial);
                         if score > current + 1e-9
                             && best.as_ref().is_none_or(|(_, s)| score > *s)
@@ -425,8 +428,7 @@ fn try_collapse(m: &HalfEdgeMesh, h: u32, p: Vec3) -> Option<HalfEdgeMesh> {
         return None;
     }
     let mut t = m.clone();
-    t.collapse(h, p);
-    Some(t)
+    t.collapse(h, p).then_some(t)
 }
 
 /// Fusions de `h` possibles sur une copie : vers chaque extrémité et vers le milieu.

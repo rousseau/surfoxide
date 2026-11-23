@@ -111,7 +111,9 @@ pub fn bounti_segmentation(
     };
     for out in outs {
         let d = derivative_dir(bids_root, out, PIPELINE_BOUNTI, participant, session)?;
-        let path = d.anat.join(format!("{}_desc-bounti_dseg.nii.gz", d.prefix));
+        let path = d
+            .anat
+            .join(format!("{}{}", d.prefix, crate::sorties::ENTREE_SEGMENTATION));
         if path.is_file() {
             return Ok(path);
         }

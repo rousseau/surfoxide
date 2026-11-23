@@ -13,6 +13,7 @@ use surfoxide_core::distance::signed_distance;
 use surfoxide_core::filter::{crop_to, extract, gaussian_blur};
 use surfoxide_core::{Hemisphere, TriMesh, Volume};
 use surfoxide_io::gifti::SurfaceMeta;
+use surfoxide_io::sorties;
 use surfoxide_mask::LabelTable;
 use surfoxide_pial::{pial_from_white, solve_laplace, sulcal_skeleton, Field, PialParams};
 use surfoxide_topofix::{correct_topology, Defect, Side, Strategy};
@@ -705,8 +706,9 @@ pub fn run(
             if white_report.valid { "respecté" } else { "NON RESPECTÉ" },
             t.elapsed().as_secs_f64()
         );
-        let prefix = format!("{}_hemi-{}", out_prefix.display(), hemi.bids());
-        let path = format!("{prefix}_white.surf.gii");
+        // Noms de fichiers : table des sorties (`surfoxide_io::sorties`), la même que celle de `surfx --describe`.
+        let name = |id: &str| format!("{}{}", out_prefix.display(), sorties::suffixe(id, hemi.bids()));
+        let path = name("white");
         surfoxide_io::gifti::write_surface(&path, &w.mesh, &meta(hemi, "GrayWhite", &labels, seg))
             .map_err(|e| format!("{path}: {e}"))?;
         let mut report = serde_json::json!({
@@ -721,7 +723,7 @@ pub fn run(
         // Sommets corticaux de la surface blanche (0 sur la face médiale : ventricules, noyaux gris).
         let cortical = surfoxide_mask::cortical_vertices(&w.mesh, &grids.cortex, 1.0, 3);
         let n_cortical = cortical.iter().filter(|&&c| c).count();
-        let path = format!("{prefix}_cortex.shape.gii");
+        let path = name("cortex");
         surfoxide_io::gifti::write_fields(
             &path,
             &[surfoxide_core::VertexField::new(
@@ -768,9 +770,9 @@ pub fn run(
             "crêtes gyrales positives, fonds de sillons négatifs (convention de l'atlas dHCP ; opposée à FreeSurfer)";
         curv_meta.other.insert("SignConvention".into(), sign.into());
         sulc_meta.other.insert("SignConvention".into(), sign.into());
-        for (name, values, m) in [("curv", curv.mean, &curv_meta), ("sulc", dpf.depth.clone(), &sulc_meta)] {
-            let path = format!("{prefix}_{name}.shape.gii");
-            surfoxide_io::gifti::write_fields(&path, &[surfoxide_core::VertexField::new(name, values)], m)
+        for (field, values, m) in [("curv", curv.mean, &curv_meta), ("sulc", dpf.depth.clone(), &sulc_meta)] {
+            let path = name(field);
+            surfoxide_io::gifti::write_fields(&path, &[surfoxide_core::VertexField::new(field, values)], m)
                 .map_err(|e| format!("{path}: {e}"))?;
         }
         qc.push(surface_qc(
@@ -832,10 +834,10 @@ pub fn run(
                 reg.min_angle.1
             );
             valid &= pial_report.valid && pair.valid;
-            let path = format!("{prefix}_pial.surf.gii");
+            let path = name("pial");
             surfoxide_io::gifti::write_surface(&path, &pial.mesh, &meta(hemi, "Pial", &labels, seg))
                 .map_err(|e| format!("{path}: {e}"))?;
-            let path = format!("{prefix}_thickness.shape.gii");
+            let path = name("thickness");
             surfoxide_io::gifti::write_fields(
                 &path,
                 std::slice::from_ref(&pial.thickness),
@@ -851,18 +853,18 @@ pub fn run(
             report["pial_min_edge"] = reg.min_edge.1.into();
             report["pial_min_angle"] = reg.min_angle.1.into();
             if std::env::var_os("SURFOXIDE_DEBUG").is_some() {
-                let path = format!("{prefix}_missing.shape.gii");
+                let path = format!("{}_hemi-{}_missing.shape.gii", out_prefix.display(), hemi.bids());
                 surfoxide_io::gifti::write_fields(&path, std::slice::from_ref(&pial.missing), &SurfaceMeta::default())
                     .map_err(|e| format!("{path}: {e}"))?;
             }
             report["mean_thickness"] = mean_th.into();
         }
         report["valid"] = valid.into();
-        write_json(&format!("{prefix}_report.json"), &report)?;
-        println!("écrit : {prefix}_*");
+        write_json(&name("report"), &report)?;
+        println!("écrit : {}_hemi-{}_*", out_prefix.display(), hemi.bids());
         all_valid &= valid;
     }
-    let path = format!("{}_desc-surfqc.tsv", out_prefix.display());
+    let path = format!("{}{}", out_prefix.display(), sorties::suffixe("surfqc", ""));
     surfoxide_io::surfqc::write_surfqc(&path, &qc).map_err(|e| format!("{path}: {e}"))?;
     println!("écrit : {path}");
     Ok(all_valid)

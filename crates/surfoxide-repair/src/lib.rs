@@ -10,8 +10,12 @@
 //!   que des intersections subsistent.
 
 use std::collections::HashSet;
+use std::sync::{Arc, OnceLock};
 
-use surfoxide_check::{cross_intersections, cross_intersections_among, self_intersections, self_intersections_among};
+use surfoxide_check::bvh::{Aabb, Bvh};
+use surfoxide_check::{
+    cross_intersections, cross_intersections_among_in, self_intersections, self_intersections_among_in,
+};
 use surfoxide_core::adjacency::vertex_neighbors;
 use surfoxide_core::vec3::{self, Vec3};
 use surfoxide_core::TriMesh;
@@ -27,31 +31,53 @@ pub fn intersecting_vertices(mesh: &TriMesh) -> HashSet<u32> {
 
 /// Faces à recontrôler après avoir ramené des sommets, et déplacement maximal de ces sommets (mm) : un contrôle
 /// de proximité doit regarder les points qui étaient près de ces faces avant le retour, à `margin` près.
+///
+/// La région porte aussi les hiérarchies de boîtes, construites une fois par appel de [`safe_update_with`] et
+/// non à chaque tour : `swept` couvre chaque face dans ses deux positions possibles (tout sommet est soit à
+/// son ancienne position, soit à la nouvelle), `obstacle` est la hiérarchie de l'obstacle, construite au
+/// premier besoin (un seul obstacle, fixe, par appel).
 #[derive(Debug, Clone)]
 pub struct Region {
     pub faces: Vec<u32>,
     pub margin: f64,
+    swept: Arc<Bvh>,
+    obstacle: Arc<OnceLock<Bvh>>,
 }
 
 /// Comme [`conflicting_vertices`], restreint aux paires dont une face de `mesh` est dans la région (toutes
 /// les faces si `None`).
 pub fn conflicting_vertices_among(mesh: &TriMesh, obstacle: Option<&TriMesh>, region: Option<&Region>) -> HashSet<u32> {
-    let Some(Region { faces: region, .. }) = region else {
+    let Some(r) = region else {
         return conflicting_vertices(mesh, obstacle);
     };
     let f = mesh.faces();
-    let mut bad: HashSet<u32> = self_intersections_among(mesh, region)
+    let mut bad: HashSet<u32> = self_intersections_among_in(mesh, &r.swept, &r.faces)
         .into_iter()
         .flat_map(|(a, b)| f[a as usize].into_iter().chain(f[b as usize]))
         .collect();
     if let Some(o) = obstacle {
+        let bvh = r.obstacle.get_or_init(|| Bvh::new(o));
         bad.extend(
-            cross_intersections_among(mesh, o, region)
+            cross_intersections_among_in(mesh, o, bvh, &r.faces)
                 .into_iter()
                 .flat_map(|(a, _)| f[a as usize]),
         );
     }
     bad
+}
+
+/// Hiérarchie des faces de `mesh` dont chaque boîte contient la face avec ses sommets aux positions `old`
+/// comme aux positions `new`, et dans tout mélange des deux.
+fn swept_bvh(mesh: &TriMesh, old: &[Vec3], new: &[Vec3]) -> Bvh {
+    let boxes = mesh
+        .faces()
+        .iter()
+        .map(|t| {
+            t.iter()
+                .fold(Aabb::EMPTY, |b, &i| b.grow(old[i as usize]).grow(new[i as usize]))
+        })
+        .collect();
+    Bvh::from_boxes(boxes)
 }
 
 /// Sommets des faces de `mesh` qui se coupent entre elles ou qui coupent `obstacle`.
@@ -89,6 +115,10 @@ pub fn safe_update_against(mesh: &mut TriMesh, new: &[Vec3], obstacle: Option<&T
 /// contrôle), sinon seulement les conflits qui touchent une face de la région. Après le premier contrôle, seuls
 /// les sommets ramenés ont bougé : un conflit nouveau ou persistant touche forcément une de leurs faces, et
 /// le contrôle restreint suffit (même résultat qu'un contrôle complet, en bien moins de temps).
+///
+/// Les hiérarchies de boîtes des contrôles restreints sont construites une seule fois (voir [`Region`]) : un
+/// tour ne coûte que le voisinage des sommets ramenés, même quand les sommets en conflit se libèrent de proche
+/// en proche sur des milliers de tours (pas implicite qui déplace toute la surface).
 pub fn safe_update_with(
     mesh: &mut TriMesh,
     new: &[Vec3],
@@ -100,6 +130,7 @@ pub fn safe_update_with(
     let vf = surfoxide_core::adjacency::vertex_faces(mesh);
     let mut held: HashSet<u32> = HashSet::new();
     let mut region: Option<Region> = None;
+    let mut trees: Option<(Arc<Bvh>, Arc<OnceLock<Bvh>>)> = None;
     loop {
         let fresh: Vec<u32> = conflicts(mesh, region.as_ref())
             .into_iter()
@@ -118,7 +149,15 @@ pub fn safe_update_with(
         }
         faces.sort_unstable();
         faces.dedup();
-        region = Some(Region { faces, margin });
+        let (swept, obstacle) = trees
+            .get_or_insert_with(|| (Arc::new(swept_bvh(mesh, &old, new)), Arc::new(OnceLock::new())))
+            .clone();
+        region = Some(Region {
+            faces,
+            margin,
+            swept,
+            obstacle,
+        });
     }
 }
 
@@ -297,5 +336,136 @@ mod tests {
         assert!(r.initial > 0);
         assert_eq!(r.remaining, 0, "{r:?}");
         assert_eq!(topology_report(&s), before);
+    }
+
+    /// Générateur congruentiel (graine fixée) : tirages uniformes dans [−1, 1].
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next(&mut self) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (self.0 >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+        }
+    }
+
+    /// Algorithme d'avant la correction, gardé comme oracle : chaque tour reconstruit les hiérarchies de
+    /// boîtes de la surface et de l'obstacle (`self_intersections_among`, `cross_intersections_among`).
+    fn safe_update_reference(mesh: &mut TriMesh, new: &[Vec3], obstacle: Option<&TriMesh>) -> usize {
+        use surfoxide_check::{cross_intersections_among, self_intersections_among};
+        let old = mesh.vertices().to_vec();
+        mesh.vertices_mut().copy_from_slice(new);
+        let vf = surfoxide_core::adjacency::vertex_faces(mesh);
+        let mut held: HashSet<u32> = HashSet::new();
+        let mut region: Option<Vec<u32>> = None;
+        loop {
+            let bad: HashSet<u32> = match &region {
+                None => conflicting_vertices(mesh, obstacle),
+                Some(r) => {
+                    let f = mesh.faces();
+                    let mut bad: HashSet<u32> = self_intersections_among(mesh, r)
+                        .into_iter()
+                        .flat_map(|(a, b)| f[a as usize].into_iter().chain(f[b as usize]))
+                        .collect();
+                    if let Some(o) = obstacle {
+                        bad.extend(
+                            cross_intersections_among(mesh, o, r)
+                                .into_iter()
+                                .flat_map(|(a, _)| f[a as usize]),
+                        );
+                    }
+                    bad
+                }
+            };
+            let fresh: Vec<u32> = bad
+                .into_iter()
+                .filter(|&v| !held.contains(&v) && old[v as usize] != new[v as usize])
+                .collect();
+            if fresh.is_empty() {
+                return held.len();
+            }
+            let mut faces: Vec<u32> = Vec::new();
+            for v in fresh {
+                mesh.vertices_mut()[v as usize] = old[v as usize];
+                held.insert(v);
+                faces.extend(&vf[v as usize]);
+            }
+            faces.sort_unstable();
+            faces.dedup();
+            region = Some(faces);
+        }
+    }
+
+    #[test]
+    fn hierarchie_construite_une_fois_meme_resultat_que_l_algorithme_d_origine() {
+        // Sphère, puis pas aléatoires de l'ordre de l'arête : beaucoup de conflits, résolus en plusieurs tours ;
+        // avec et sans obstacle (sphère intérieure que les pas vers le centre traversent).
+        let base = icosphere(4, 10.0);
+        let edge = surfoxide_core::adjacency::mean_edge_length(&base);
+        let inner = icosphere(3, 9.6);
+        let mut rng = Lcg(7);
+        let mut tours_multiples = 0;
+        for essai in 0..12 {
+            let obstacle = (essai % 2 == 1).then_some(&inner);
+            let amplitude = if essai < 6 { 0.6 } else { 1.5 } * edge;
+            let new: Vec<Vec3> = base
+                .vertices()
+                .iter()
+                .map(|&p| {
+                    [
+                        p[0] + amplitude * rng.next(),
+                        p[1] + amplitude * rng.next(),
+                        p[2] + amplitude * rng.next(),
+                    ]
+                })
+                .collect();
+            let (mut a, mut b) = (base.clone(), base.clone());
+            let held_a = safe_update_against(&mut a, &new, obstacle);
+            let held_b = safe_update_reference(&mut b, &new, obstacle);
+            assert_eq!(held_a, held_b, "essai {essai}");
+            assert_eq!(a.vertices(), b.vertices(), "essai {essai}");
+            assert!(self_intersections(&a).is_empty(), "essai {essai}");
+            if let Some(o) = obstacle {
+                assert!(cross_intersections(&a, o).is_empty(), "essai {essai}");
+            }
+            tours_multiples += (held_a > 0 && held_a < base.n_vertices()) as usize;
+        }
+        assert!(tours_multiples >= 8, "{tours_multiples}");
+    }
+
+    #[test]
+    fn controle_restreint_avec_la_hierarchie_balayee() {
+        // La hiérarchie construite sur les boîtes balayées (anciennes et nouvelles positions) donne les mêmes
+        // paires que la hiérarchie reconstruite sur la surface du moment, pour des mélanges aléatoires des deux
+        // positions, la région étant (comme dans `safe_update_with`) les faces des sommets ramenés.
+        let old_mesh = icosphere(3, 10.0);
+        let edge = surfoxide_core::adjacency::mean_edge_length(&old_mesh);
+        let old = old_mesh.vertices().to_vec();
+        let mut rng = Lcg(11);
+        let new: Vec<Vec3> = old
+            .iter()
+            .map(|&p| std::array::from_fn(|a| p[a] + 1.5 * edge * rng.next()))
+            .collect();
+        let mut m = old_mesh.clone();
+        let mut paires = 0;
+        // Les deux rôles : surface propre ramenée vers une surface qui se coupe, et l'inverse.
+        for (old, new) in [(&old, &new), (&new, &old)] {
+            let swept = swept_bvh(&old_mesh, old, new);
+            for _ in 0..40 {
+                let back: Vec<bool> = (0..old.len()).map(|_| rng.next() < -0.5).collect();
+                for (v, &b) in back.iter().enumerate() {
+                    m.vertices_mut()[v] = if b { old[v] } else { new[v] };
+                }
+                let faces: Vec<u32> = (0..m.n_faces() as u32)
+                    .filter(|&f| m.faces()[f as usize].iter().any(|&v| back[v as usize]))
+                    .collect();
+                let attendu = surfoxide_check::self_intersections_among(&m, &faces);
+                paires += attendu.len();
+                assert_eq!(self_intersections_among_in(&m, &swept, &faces), attendu);
+            }
+        }
+        assert!(paires > 100, "{paires}");
     }
 }

@@ -8,6 +8,7 @@
 //! - [`surfqc`] : contrôle des maillages d'une session (`desc-surfqc.tsv`), lu par guioxide.
 //! - [`freesurfer`] : surfaces et fichiers « curv » de FreeSurfer.
 //!
+//! - [`sorties`] : table des entrées et sorties de `surfx run`, source des noms de fichiers et de `surfx --describe`.
 //! - [`bids`] : chemins des dérivées BIDS (`surfx run --bids`) et `dataset_description.json`.
 //! - [`data`] : emplacement des données réelles rapatriées (`scripts/fetch-data.sh`).
 //!
@@ -24,6 +25,7 @@ pub mod freesurfer;
 pub mod gifti;
 pub mod nifti;
 pub mod ply;
+pub mod sorties;
 pub mod stl;
 pub mod surfqc;
 pub mod vtk;

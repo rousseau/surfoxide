@@ -77,12 +77,18 @@ pub fn self_intersections(mesh: &TriMesh) -> Vec<(u32, u32)> {
 /// Comme [`self_intersections`], restreint aux paires dont une face au moins est dans `faces` : de quoi
 /// recontrôler une surface après n'avoir déplacé que quelques sommets. Paires (min, max) sans doublon.
 pub fn self_intersections_among(mesh: &TriMesh, faces: &[u32]) -> Vec<(u32, u32)> {
-    let bvh = Bvh::new(mesh);
+    self_intersections_among_in(mesh, &Bvh::new(mesh), faces)
+}
+
+/// Comme [`self_intersections_among`], avec une hiérarchie `bvh` déjà construite sur les faces de `mesh`,
+/// dont chaque boîte contient la face dans sa position actuelle (elle peut être plus grande : voir
+/// [`Bvh::from_boxes`]). Même résultat, sans reconstruire la hiérarchie à chaque appel.
+pub fn self_intersections_among_in(mesh: &TriMesh, bvh: &Bvh, faces: &[u32]) -> Vec<(u32, u32)> {
     let mut out: Vec<(u32, u32)> = faces
         .par_iter()
         .flat_map_iter(|&f| {
             let mut out = Vec::new();
-            let bbox = *bvh.face_box(f);
+            let bbox = bvh::Aabb::of_points(&tri(mesh, f));
             bvh.query_box(&bbox, |g| {
                 if g != f && faces_conflict(mesh, f, g) {
                     out.push((f.min(g), f.max(g)));
@@ -98,7 +104,11 @@ pub fn self_intersections_among(mesh: &TriMesh, faces: &[u32]) -> Vec<(u32, u32)
 
 /// Comme [`cross_intersections`], restreint aux faces `faces_a` de `a`.
 pub fn cross_intersections_among(a: &TriMesh, b: &TriMesh, faces_a: &[u32]) -> Vec<(u32, u32)> {
-    let bvh = Bvh::new(b);
+    cross_intersections_among_in(a, b, &Bvh::new(b), faces_a)
+}
+
+/// Comme [`cross_intersections_among`], avec la hiérarchie `bvh` de `b` déjà construite.
+pub fn cross_intersections_among_in(a: &TriMesh, b: &TriMesh, bvh: &Bvh, faces_a: &[u32]) -> Vec<(u32, u32)> {
     faces_a
         .par_iter()
         .flat_map_iter(|&f| {

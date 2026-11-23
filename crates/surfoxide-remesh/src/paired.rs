@@ -83,8 +83,11 @@ impl Pair {
                 if !t.w.flip(h) {
                     return None;
                 }
-                let ok = t.p.flip(h);
-                debug_assert!(ok, "même structure");
+                // Même structure, donc même réponse ; sinon (recâblage refusé d'un seul côté) l'opération
+                // est écartée plutôt que de laisser les deux surfaces diverger.
+                if !t.p.flip(h) {
+                    return None;
+                }
             }
             Op::Collapse(_, _, at) => {
                 if !self.w.can_collapse(h) {
@@ -99,8 +102,9 @@ impl Pair {
                     }
                 };
                 let (pw, pp) = (place(&self.w), place(&self.p));
-                t.w.collapse(h, pw);
-                t.p.collapse(h, pp);
+                if !t.w.collapse(h, pw) || !t.p.collapse(h, pp) {
+                    return None;
+                }
                 // a disparaît dans b.
                 return Some((t, Some((a, b))));
             }
